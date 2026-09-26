@@ -5,8 +5,8 @@ Aplicação de triagem e análise de apartamentos no município do Rio de Janeir
 ## O que funciona
 
 - Catálogo parcial de páginas públicas Zuk e Mega Leilões, atualizado sob demanda, com identidade do lote, preço, data e link de origem.
-- Filtros por texto sem acentos, fonte, cidade, tipo e teto de preço; ordenação por data, preço ou nome; paginação.
-- Importação CSV/XLS/XLSX com cabeçalho após preâmbulo, leitura de moeda brasileira e deduplicação por origem. Reimportação preserva análise e anexos.
+- Lista única com origem visível; filtros por texto sem acentos, fonte, cidade exata, tipo, situação e teto de preço; inclusão explícita de preços pendentes, favoritos, comparação de até três imóveis e paginação.
+- Importação CSV/XLS/XLSX e texto colado, com prévia antes de gravar, cabeçalho após preâmbulo, moeda brasileira, rejeições por linha, conflitos e duplicatas. Reimportação preserva análise e anexos; preço ausente volta a pendente.
 - Dossiê, checklist, arquivos em IndexedDB, hash SHA-256 e verificação da presença e integridade dos anexos.
 - Cálculo determinístico de custos, MAO com comissão, margem direta, margem após OPEX e ROI. Valores desconhecidos permanecem pendentes.
 - Atualização de catálogo sem apagar dossiês; ausência na consulta marca revalidação pendente. Catálogo precisa de evento futuro e consulta recente para pré-requisitos de comitê.
@@ -23,7 +23,7 @@ npm run typecheck
 npm test
 ```
 
-`npm test` compila a aplicação e executa os testes de domínio e de componentes. `npm run test:unit` executa apenas o domínio. A implantação usa Worker via vinext/Vite; o arquivo público `.openai/hosting.json` não contém projeto nem credenciais. Não use este repositório como evidência de autorização para publicar dados de usuários.
+`npm test` compila a aplicação e executa os testes de domínio e de componentes. `npm run test:unit` executa domínio, importação, seleção e conectores sem build. A implantação usa Worker via vinext/Vite; o arquivo público `.openai/hosting.json` não contém projeto nem credenciais. Não use este repositório como evidência de autorização para publicar dados de usuários.
 
 ## Limites atuais
 
@@ -35,8 +35,15 @@ O teto de R$245 mil para descoberta deriva apenas do limite de saída de R$350 m
 
 ## Documentação
 
+- [Fontes, APIs e regras de dados](docs/FONTES_E_DADOS.md)
 - [Auditoria e verificação](docs/AUDITORIA.md)
 - [Concorrentes e alternativas](docs/COMPETIDORES.md)
 - [Roadmap e critérios de aceite](docs/ROADMAP.md)
 
 Documentos originais, dados de usuários, credenciais e histórico privado não integram este repositório. Os testes usam casos sintéticos. A licença do projeto ainda não foi escolhida; a disponibilidade pública não concede automaticamente uma licença de uso. Avisos de terceiros permanecem nos respectivos arquivos.
+
+## Uso guiado
+
+1. Em **Pipeline**, atualize o catálogo ou abra **Importar lista CSV ou Excel**. Também é possível colar células com cabeçalho. Confira a prévia antes de importar.
+2. Escolha a cidade, tipo, teto de preço e situação. Marque favoritos e compare até três imóveis; dados ausentes continuam como pendentes.
+3. Abra **Analisar imóvel**. Confira o resumo, reúna documentos no dossiê e preencha o financeiro em três etapas. O comitê permanece bloqueado para aprovação final nesta versão local.

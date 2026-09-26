@@ -6,7 +6,7 @@ export const LISTINGS = [
 export type Candidate = {externalId:string;name:string;city:string;source:string;url:string;bid:number;auctionAt:string;capturedAt:string;note:string;snapshotHash?:string};
 const decode=(v:string)=>v.replace(/&amp;/g,'&').replace(/&#0*39;|&apos;/g,"'").replace(/&quot;/g,'"').replace(/&nbsp;/g,' ');
 const text=(s:string)=>decode(s.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'').replace(/<[^>]+>/g,' ')).replace(/\s+/g,' ').trim();
-function date(v:string) { const m=v.match(/(\d{2})\/(\d{2})\/(\d{4})\s*(?:às|as)?\s*(\d{2}):(\d{2})/); if(!m)return '';const iso=`${m[3]}-${m[2]}-${m[1]}T${m[4]}:${m[5]}:00-03:00`;return Number.isFinite(Date.parse(iso))?iso:''; }
+function date(v:string) { const m=v.match(/(\d{2})\/(\d{2})\/(\d{4})\s*(?:às|as)?\s*(\d{2}):(\d{2})/); if(!m)return '';const iso=`${m[3]}-${m[2]}-${m[1]}T${m[4]}:${m[5]}:00-03:00`;const d=new Date(iso);return Number.isFinite(d.getTime()) && new Date(d.getTime()-3*3600000).toISOString().slice(0,10)===iso.slice(0,10)?iso:''; }
 export function parseListing(html:string,key:'zuk'|'mega',at:string):Candidate[] {
  const source=LISTINGS.find(s=>s.key===key)!;
  const chunks = key==='zuk'?html.split(/<div\s+class="card-property card_lotes_div"/i).slice(1):html.split(/<div[^>]*\bdata-key="\d+"[^>]*>/i).slice(1);
@@ -63,17 +63,17 @@ export async function collectCatalog(fetcher:typeof fetch=fetch,at=new Date().to
   try {
    const html=await readPublic(source.url,source.host,fetcher); const candidates=parseListing(html,source.key,at);
    const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(html)))).map(v=>v.toString(16).padStart(2,'0')).join('');
-   let checked=0;
+   let checked=0, failed=0, ineligible=0;
    // Bounded requests. An incomplete scan never becomes a claim of complete coverage.
    for(let i=0;i<Math.min(candidates.length,20);i+=4) {
     const group=await Promise.all(candidates.slice(i,Math.min(i+4,20)).map(async item=> {
      try {const detail=await readPublic(item.url,source.host,fetcher);checked++;
-      if(!detailEligible(detail,source.key))return null;
+      if(!detailEligible(detail,source.key)){ineligible++;return null;}
       return {...item,snapshotHash:hash,note:item.note+' Página individual acessível; consulta parcial, máximo 20 detalhes por fonte.'};
-     }catch{return null;}
+     }catch{failed++;return null;}
     }));catalog.push(...group.filter((c):c is Candidate & {snapshotHash:string}=>c!==null));
    }
-   sources.push({name:source.name,url:source.url,mode:'listagem pública',checkedAt:at,status:'consultada',message:`Cobertura parcial: ${candidates.length} candidatos na página, ${checked} detalhes acessíveis; máximo 20. Sem paginação nesta versão.`,snapshotHash:hash});
+   sources.push({name:source.name,url:source.url,mode:'listagem pública',checkedAt:at,status:failed>0 && checked===0?'indisponível':'consultada',message:`Cobertura parcial: ${candidates.length} candidatos na página; ${checked} detalhes acessíveis, ${ineligible} sem condição ativa confirmada, ${failed} falhas de detalhe; máximo 20. Sem paginação. Zero resultados não comprova ausência de oportunidades.`,snapshotHash:hash});
   }catch(e){sources.push({name:source.name,url:source.url,mode:'listagem pública',checkedAt:at,status:'indisponível',message:e instanceof Error && /Fonte respondeu HTTP|Fonte exige|limite|Redirecionamento|Conteúdo não HTML/.test(e.message)?e.message:'Não foi possível consultar esta fonte neste ambiente. Tente novamente mais tarde; o histórico foi preservado.'});}
  }
  const pending=[

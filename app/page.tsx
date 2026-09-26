@@ -2,7 +2,9 @@
 
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
-import { catalogCurrent, importIdentity, calculate, evidenceValid, financeFields, invalidateDecision, money, normalize, rowsFromMatrix, safeUrl } from "@/lib/domain";
+import { catalogCurrent, calculate, evidenceValid, financeFields, invalidateDecision, normalize, rowsFromMatrix, safeUrl } from "@/lib/domain";
+import { prepareIntake, type IntakePlan } from "@/lib/intake";
+import { announcedPrice, selectionStatus, selectOpportunities } from "@/lib/selection";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -106,6 +108,7 @@ type Opportunity = {
   source: string;
   url: string;
   propertyType?: string;
+  favorite?: boolean;
   stage: string;
   history: string[];
   evidence: Evidence[];
@@ -124,13 +127,13 @@ type Opportunity = {
 };
 
 const STORE = "hermes-leilao-rj-v4";
-const now = () => new Date().toISOString().slice(0, 10);
+const now = () => new Intl.DateTimeFormat("en-CA",{timeZone:"America/Sao_Paulo"}).format(new Date());
 const uid = () =>
   String(Date.now()) + "-" + Math.random().toString(36).slice(2);
 const brl = new Intl.NumberFormat("pt-BR", {
   style: "currency",
   currency: "BRL",
-  maximumFractionDigits: 0,
+  maximumFractionDigits: 2,
 });
 const caixaSnapshotUrl =
   "https://venda-imoveis.caixa.gov.br/sistema/download-lista.asp";
@@ -231,19 +234,6 @@ const stages = [
   "Conciliação e lições",
 ];
 const initial = (): Opportunity[] => [];
-const normalizeHeader = (value: string) =>
-  value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-zA-Z0-9]/g, "")
-    .toLowerCase();
-const valueFrom = (row: Record<string, unknown>, keys: string[]) => {
-  const expected = keys.map(normalizeHeader);
-  const match = Object.keys(row).find((key) =>
-    expected.includes(normalizeHeader(key)),
-  );
-  return match === undefined ? "" : String(row[match] ?? "").trim();
-};
 async function hash(file: Blob) {
   const bytes = await file.arrayBuffer();
   const h = await crypto.subtle.digest("SHA-256", bytes);
@@ -259,15 +249,24 @@ function openFiles() {
     r.onerror = () => reject(r.error);
   });
 }
-async function storeFile(key: string, file: File) {
+async function storeFiles(files: { key: string; file: File }[]) {
   const d = await openFiles();
-  await new Promise<void>((resolve, reject) => {
-    const tx = d.transaction("files", "readwrite");
-    tx.objectStore("files").put(file, key);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-  d.close();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = d.transaction("files", "readwrite");
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error("Gravação de anexos cancelada"));
+      try {
+        for (const { key, file } of files) tx.objectStore("files").put(file, key);
+      } catch (error) {
+        tx.abort();
+        reject(error);
+      }
+    });
+  } finally {
+    d.close();
+  }
 }
 function badge(s: CheckState) {
   return s === "aprovado"
@@ -286,6 +285,12 @@ export default function Home() {
   const [tab, setTab] = useState("Pipeline");
   const [operationBusy,setOperationBusy] = useState(false);
   const storedSnapshot = useRef<string | null>(null);
+  const [pendingImport,setPendingImport]=useState<IntakePlan|null>(null);
+  const [importText,setImportText]=useState("");
+  const [includeUnknown,setIncludeUnknown]=useState(true);
+  const [statusFilter,setStatusFilter]=useState("");
+  const [favoritesOnly,setFavoritesOnly]=useState(false);
+  const [compareIds,setCompareIds]=useState<string[]>([]);
   const [sortBy,setSortBy] = useState("date");
   const [typeFilter,setTypeFilter] = useState("");
   const [sourceFilter,setSourceFilter] = useState("");
@@ -318,23 +323,10 @@ export default function Home() {
   const committeeReady = !!selected && catalogCurrent(selected,clock) && mandatePass && blockers===0 && !expired && financePass;
   // Owner-only local storage cannot authenticate two independent approvers.
   const finalCommitteeReady = false;
-  const filteredItems = useMemo(() => {
-    const q = normalize(pipelineQuery);
-    return items.filter((item) =>
-      normalize([item.id,item.name,item.city,item.source,item.stage,item.url].join(" ")).includes(q) &&
-      (!typeFilter || item.propertyType===typeFilter) && (!sourceFilter || item.source===sourceFilter) && (!cityFilter || normalize(item.city).includes(normalize(cityFilter))) &&
-      (!maxBidFilter || (Number.isFinite(item.observedBid ?? item.finance.bid) && (item.observedBid ?? item.finance.bid)<=Number(maxBidFilter)))
-    ).sort((a,b)=> sortBy==="price" ? (Number.isFinite(a.observedBid ?? a.finance.bid) ? (a.observedBid ?? a.finance.bid) : Infinity)-(Number.isFinite(b.observedBid ?? b.finance.bid) ? (b.observedBid ?? b.finance.bid) : Infinity) : sortBy==="name" ? a.name.localeCompare(b.name,"pt-BR") : (a.auctionAt ? Date.parse(a.auctionAt) : Infinity)-(b.auctionAt ? Date.parse(b.auctionAt) : Infinity));
-  }, [items, pipelineQuery, sourceFilter, cityFilter, maxBidFilter, typeFilter, sortBy]);
-  const catalogItems = filteredItems.filter(
-    (item) => item.pipelineOrigin === "verified-catalog",
-  );
-  const importedItems = filteredItems.filter(
-    (item) => item.pipelineOrigin === "file-import",
-  );
-  const manualItems = filteredItems.filter(
-    (item) => item.pipelineOrigin === "manual",
-  );
+  const filteredItems = useMemo(() => selectOpportunities(items,{query:pipelineQuery,source:sourceFilter,city:cityFilter,type:typeFilter,maxPrice:maxBidFilter,includeUnknown,status:statusFilter,favoritesOnly,sort:sortBy},clock),[items,pipelineQuery,sourceFilter,cityFilter,typeFilter,maxBidFilter,includeUnknown,statusFilter,favoritesOnly,sortBy,clock]);
+  const comparison=items.filter(i=>compareIds.includes(i.id));
+  const toggleFavorite=(id:string)=>setItems(all=>all.map(i=>i.id===id?{...i,favorite:!i.favorite}:i));
+  const toggleCompare=(id:string)=>setCompareIds(ids=>ids.includes(id)?ids.filter(x=>x!==id):ids.length<3?[...ids,id]:ids);
 
   useEffect(() => {
     try {
@@ -566,95 +558,8 @@ export default function Home() {
       const sheet = book.Sheets[book.SheetNames[0]];
       const rows = rowsFromMatrix(XLSX.utils.sheet_to_json<unknown[]>(sheet, {header:1,defval:""}));
       if (!rows.length) throw new Error("A primeira aba não contém linhas");
-      let createdCount = 0;
-      let updatedCount = 0;
-      let first = "";
-      const next = [...items];
-      rows.forEach((row, index) => {
-        const val = (keys: string[]) => valueFrom(row, keys);
-        const name = val([
-          "Nome",
-          "Imóvel",
-          "Imovel",
-          "Endereço",
-          "Endereco",
-          "Descrição",
-          "Descricao",
-        ]);
-        const url = safeUrl(val(["URL", "Link", "Link do imóvel", "Link de acesso", "Página"]));
-        const code =
-          val([
-            "id",
-            "Código",
-            "codigo",
-            "Número do imóvel", "N° do imóvel", "N imóvel",
-            "Numero do imovel",
-            "Identificador", "N° do imóvel", "N imóvel",
-          ]) || "IMPORT-" + Date.now() + "-" + index;
-        if (!name && !url && !val(["id", "Código", "Identificador"])) return;
-        const existing = next.findIndex(
-          (i) => i.pipelineOrigin === "file-import" && (i.id === importIdentity(val(["Fonte","Origem"]),url,file.name,code) && (!url || !i.url || i.url===url) || (!!url && i.url === url)),
-        );
-        const patch = {
-          id: importIdentity(val(["Fonte","Origem"]),url,file.name,code)+(next.some(i=>i.id===importIdentity(val(["Fonte","Origem"]),url,file.name,code) && url && i.url && i.url!==url)?"-"+encodeURIComponent(url):""),
-          name: name || "Ativo importado",
-          observedBid: money(val(["Preço","Preço de venda","Valor","Lance mínimo"])),
-          propertyType: /apartamento/i.test(val(["Tipo","Tipo de imóvel","Descrição"])) ? "Apartamento" : "Pendente",
-          city: val(["Cidade", "cidade", "Município", "Municipio"]) || "RJ",
-          source: val(["Fonte", "Origem"]) || "Importação: " + file.name,
-          url,
-          updated: now(),
-          pipelineOrigin: "file-import" as const,
-        };
-        if (existing >= 0) {
-          next[existing] = {
-            ...next[existing],
-            ...patch,
-            id: next[existing].id,
-            decision: invalidateDecision(),
-            history: [
-              ...next[existing].history,
-              "Registro atualizado pelo arquivo " + file.name,
-            ],
-          };
-          updatedCount += 1;
-        } else {
-          const createdItem = make({...patch,finance:{...newFinance(),bid:money(val(["Preço","Preço de venda","Valor","Lance mínimo"]))}});
-          createdItem.history.push("Importado de " + file.name);
-          next.unshift(createdItem);
-          if (!first) first = createdItem.id;
-          createdCount += 1;
-        }
-      });
-      if (!createdCount && !updatedCount) {
-        throw new Error("Nenhuma linha possui ID, nome ou URL reconhecível");
-      }
-      setItems(current=> {
-        const incoming=next.filter(i=>i.pipelineOrigin==="file-import");
-        const byId=new Map(incoming.map(i=>[i.id,i]));
-        const merged=current.map(old=>{const update=byId.get(old.id);if(!update)return old;byId.delete(old.id);return {...old,name:update.name,city:update.city,source:update.source,url:update.url,propertyType:update.propertyType,observedBid:Number.isFinite(update.observedBid)?update.observedBid:old.observedBid,history:[...old.history,...update.history.slice(old.history.length)],decision:invalidateDecision()};});
-        return [...byId.values(),...merged];
-      });
-      if (first) setSelectedId(first);
-      setImportBatches((batches) => [
-        {
-          id: uid(),
-          fileName: file.name,
-          importedAt: new Date().toISOString(),
-          rows: rows.length,
-          created: createdCount,
-          updated: updatedCount,
-        },
-        ...batches,
-      ]);
-      setNotice(
-        file.name +
-          ": " +
-          String(createdCount) +
-          " criado(s) e " +
-          String(updatedCount) +
-          " atualizado(s) no pipeline de arquivos enviados.",
-      );
+      setPendingImport(prepareIntake(rows,file.name));
+      setNotice("Confira a prévia antes de importar. Sua base ainda não foi alterada.");
     } catch (error) {
       setNotice(
         "Importação não concluída: " +
@@ -665,6 +570,34 @@ export default function Home() {
     event.target.value = "";
     setOperationBusy(false);
   }
+  function previewPastedList() {
+    try {
+      if(new TextEncoder().encode(importText).length>10*1024*1024)throw new Error("Limite de 10 MB");
+      const book=XLSX.read(importText,{type:"string",raw:true});
+      const rows=rowsFromMatrix(XLSX.utils.sheet_to_json<unknown[]>(book.Sheets[book.SheetNames[0]],{header:1,defval:""}));
+      setPendingImport(prepareIntake(rows,"lista-colada.csv"));
+      setNotice("Prévia pronta. Confira os avisos e confirme as linhas válidas.");
+    } catch(error) {setNotice("Lista não reconhecida: "+(error instanceof Error?error.message:"revise o cabeçalho"));}
+  }
+  function confirmImport() {
+    if(!pendingImport || storageBlocked || operationBusy)return;
+    const next=[...items];let created=0,updated=0;
+    for(const row of pendingImport.rows) {
+      const existing=next.findIndex(i=>i.pipelineOrigin==="file-import" && ((i.id===row.id && (!row.url||!i.url||row.url===i.url)) || (!!row.url && i.url===row.url)));
+      const stamp=new Date().toISOString();
+      const patch={name:row.name,city:row.city,source:row.source,url:row.url,propertyType:row.propertyType,observedBid:row.observedBid,capturedAt:stamp,catalogStatus:"Revalidação manual pendente",updated:now()};
+      if(existing>=0) {next[existing]={...next[existing],...patch,decision:invalidateDecision(),history:[...next[existing].history,`Arquivo ${pendingImport.fileName}, linha ${row.row}, recebido em ${stamp}. `+row.warnings.join("; ")]};updated++;}
+      else {const id=next.some(i=>i.id===row.id)?row.id+"-"+encodeURIComponent(row.url||uid()):row.id;next.push(make({...patch,id,pipelineOrigin:"file-import",finance:{...newFinance(),bid:row.observedBid},history:[`Importado de ${pendingImport.fileName}, linha ${row.row}. `+row.warnings.join("; ")]}));created++;}
+    }
+    setItems(next);
+    setImportBatches(batches=>[{id:uid(),fileName:pendingImport.fileName,importedAt:new Date().toISOString(),rows:pendingImport.total,created,updated},...batches]);
+    setNotice(`${created} criado(s), ${updated} atualizado(s), ${pendingImport.rejected.length} linha(s) recusada(s) e ${pendingImport.duplicates} repetição(ões) ignorada(s). Análises e anexos anteriores foram preservados.`);
+    setPendingImport(null);setImportText("");
+  }
+  function downloadImportReport() {
+    if(!pendingImport)return;
+    const blob=new Blob([JSON.stringify(pendingImport,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="relatorio-importacao.json";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  }
   async function attach(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files || []);
     if (!selected || !files.length || operationBusy) return;
@@ -674,7 +607,6 @@ export default function Home() {
     const documents = await Promise.all(
       files.map(async (file) => {
         const key = selected.id + "/" + uid();
-        await storeFile(key, file);
         return {
           id: uid(),
           name: file.name,
@@ -691,6 +623,7 @@ export default function Home() {
         };
       }),
     );
+    await storeFiles(documents.map((doc, index) => ({ key: doc.blobKey, file: files[index] })));
     mutate(
       (i) => ({
         ...i,
@@ -771,13 +704,13 @@ export default function Home() {
             Novo ativo
           </button>
         </div>
-        <div className="mb-5 flex gap-3 rounded-xl border border-[#bdd9c8] bg-[#e8f5eb] p-4 text-sm text-[#24523a]">
+        <div role="status" aria-live="polite" className="mb-5 flex gap-3 rounded-xl border border-[#bdd9c8] bg-[#e8f5eb] p-4 text-sm text-[#24523a]">
           <ShieldCheck className="shrink-0" size={18} />
           <p>
-            <strong>Controle ativo.</strong> {notice}
+            <strong>Atualização.</strong> {notice}
           </p>
         </div>
-        {!selected && <Card title="Comece uma análise" note="Nenhum imóvel cadastrado. Crie um ativo ou importe uma lista pelo Pipeline."><button className="btn" onClick={create}>Criar primeiro ativo</button></Card>}
+        {!selected && tab !== "Pipeline" && <Card title="Comece uma análise" note="Nenhum imóvel cadastrado. Crie um ativo ou importe uma lista pelo Pipeline."><button className="btn" onClick={create}>Criar primeiro ativo</button></Card>}
         {selected && tab === "Resumo do ativo" && (
           <section className="grid gap-5 xl:grid-cols-[1.15fr_.85fr]">
             <Card
@@ -819,7 +752,7 @@ export default function Home() {
             >
               <div className="space-y-2">
                 {selected.checks
-                  .filter((check) => check.status !== "aprovado")
+                  .filter((check) => !validCheck(check))
                   .slice(0, 5)
                   .map((check) => (
                     <div
@@ -872,7 +805,7 @@ export default function Home() {
         )}
         {tab === "Pipeline" && (
           <section className="space-y-5">
-            <Card title="Encontre oportunidades" note="Apartamentos no Rio de Janeiro. Consulte o catálogo, ajuste os filtros e abra o dossiê do imóvel.">
+            <Card title="Escolha os imóveis que vale a pena analisar" note="1. Traga as oportunidades → 2. Filtre e compare → 3. Complete a análise. O perfil inicial é apartamento no município do Rio; outros municípios ficam visíveis como fora do perfil.">
               <button className="btn" onClick={refreshCatalog} disabled={refreshingCatalog}>{refreshingCatalog ? "Consultando fontes…" : "Atualizar catálogo"}</button>
               <p className="mt-3 text-xs text-[#61786c]">Zuk e Mega Leilões: consulta parcial de páginas públicas. CAIXA: importação de lista. Preço anunciado não é valor de revenda.</p>
               <details className="mt-3"><summary className="cursor-pointer text-sm font-bold">Status das fontes ({sourceChecks.filter(s=>s.status==="consultada").length} consultadas)</summary>
@@ -897,69 +830,29 @@ export default function Home() {
               />
               <div className="grid gap-3 sm:grid-cols-3">
                 <Field label="Fonte"><select className="input" value={sourceFilter} onChange={e=>setSourceFilter(e.target.value)}><option value="">Todas</option>{[...new Set(items.map(i=>i.source))].sort().map(v=><option key={v}>{v}</option>)}</select></Field>
-                <Field label="Cidade"><input className="input" value={cityFilter} onChange={e=>setCityFilter(e.target.value)} placeholder="Ex.: Rio de Janeiro" /></Field>
+                <Field label="Cidade"><select className="input" value={cityFilter} onChange={e=>setCityFilter(e.target.value)}><option value="">Todas as cidades</option>{[...new Set(items.map(i=>i.city))].sort().map(city=><option key={city}>{city}</option>)}</select></Field>
                 <Field label="Preço anunciado máximo"><input type="number" min="0" className="input" value={maxBidFilter} onChange={e=>setMaxBidFilter(e.target.value)} placeholder="Sem limite" /></Field>
               </div>
               <div className="mt-3 grid gap-3 sm:grid-cols-2">
                 <Field label="Tipo de imóvel"><select className="input" value={typeFilter} onChange={e=>setTypeFilter(e.target.value)}><option value="">Todos</option><option>Apartamento</option><option>Casa</option><option>Outro</option><option>Pendente</option></select></Field>
                 <Field label="Ordenar por"><select className="input" value={sortBy} onChange={e=>setSortBy(e.target.value)}><option value="date">Data do leilão</option><option value="price">Menor preço anunciado</option><option value="name">Nome do imóvel</option></select></Field>
               </div>
-              <button className="btn mt-3" onClick={()=>{setPipelineQuery("");setSourceFilter("");setCityFilter("");setMaxBidFilter("");setTypeFilter("");setSortBy("date");}}>Limpar filtros</button>
+              <div className="mt-4 flex flex-wrap gap-3 text-sm">
+                <label><input type="checkbox" checked={includeUnknown} onChange={e=>setIncludeUnknown(e.target.checked)} /> Incluir imóveis sem preço informado</label>
+                <label><input type="checkbox" checked={favoritesOnly} onChange={e=>setFavoritesOnly(e.target.checked)} /> Só meus favoritos</label>
+                <Field label="Situação"><select className="input" value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}><option value="">Todas as situações</option>{["Completar análise","Rever viabilidade","Revisar documentos","Revalidar fonte","Evento passado","Fora do perfil"].map(v=><option key={v}>{v}</option>)}</select></Field>
+              </div>
+              <button className="btn mt-3" onClick={()=>{setStatusFilter("");setFavoritesOnly(false);setIncludeUnknown(true);setPipelineQuery("");setSourceFilter("");setCityFilter("");setMaxBidFilter("");setTypeFilter("");setSortBy("date");}}>Limpar filtros</button>
             </Card>
-            <Card
-              title="Catálogo público em triagem"
-              note="Lotes descobertos nas fontes públicas. A consulta é parcial e não comprova disponibilidade nem aprovação financeira."
-            >
-              <PipelineTable
-                items={catalogItems}
-                empty="Nenhum lote encontrado nesta base. Atualize para consultar as fontes; falhas não apagam análises anteriores."
-                onOpen={(id) => {
-                  setSelectedId(id);
-                  setTab("Dossiê");
-                }}
-              />
-            </Card>
-            <Card
-              title="Arquivos enviados"
-              note="Dados recebidos por CSV, XLS ou XLSX. Eles não são confundidos com oportunidade verificada."
-            >
-              {importBatches.length > 0 && (
-                <div className="mb-4 space-y-1 rounded-lg bg-[#f4f7f5] p-3 text-xs text-[#61786c]">
-                  {importBatches.slice(0, 5).map((batch) => (
-                    <p key={batch.id}>
-                      <strong>{batch.fileName}</strong> · {batch.rows} linha(s)
-                      · {batch.created} criada(s) · {batch.updated}{" "}
-                      atualizada(s) · {batch.importedAt.slice(0, 10)}
-                    </p>
-                  ))}
-                </div>
-              )}
-              <PipelineTable
-                items={importedItems}
-                empty="Nenhum arquivo enviado corresponde à busca atual."
-                onOpen={(id) => {
-                  setSelectedId(id);
-                  setTab("Dossiê");
-                }}
-              />
-            </Card>
-            <Card
-              title="Registros manuais"
-              note="Rascunhos e cadastros locais criados pelo usuário; podem estar sem URL de oportunidade."
-            >
-              <PipelineTable
-                items={manualItems}
-                empty="Nenhum registro manual corresponde à busca atual."
-                onOpen={(id) => {
-                  setSelectedId(id);
-                  setTab("Dossiê");
-                }}
-                onDelete={deleteManual}
-              />
+            {comparison.length>0 && <Card title={`Comparar ${comparison.length} de até 3 imóveis`} note="Compare preço, custo total, retorno e pendências. Favoritar ou comparar não aprova uma compra.">
+              <div className="grid gap-4 md:grid-cols-3">{comparison.map(item=>{const r=calculate(item.finance);return <article key={item.id} className="rounded-xl border p-4"><h3 className="font-bold">{item.name}</h3><p className="text-sm">{item.city}</p><dl className="my-3 space-y-2 text-sm"><dt>Preço anunciado</dt><dd className="font-bold">{fmt(announcedPrice(item))}</dd><dt>Custo total estimado</dt><dd>{fmt(r.costs)}</dd><dt>Saída conservadora</dt><dd>{fmt(item.finance.arv)}</dd><dt>Margem direta / teto calculado</dt><dd>{pct(r.projected)} / {fmt(r.mao)}</dd><dt>Situação</dt><dd>{selectionStatus(item,clock)}</dd></dl><button className="btn" onClick={()=>{setSelectedId(item.id);setTab("Resumo do ativo");}}>Analisar</button><button className="ml-3 underline" onClick={()=>toggleCompare(item.id)}>Remover</button></article>;})}</div>
+            </Card>}
+            <Card title="Oportunidades para analisar" note={`${filteredItems.length} resultado(s). Nenhum resultado desta lista é aprovação de investimento. Selecione até três para comparar.`}>
+              <PipelineTable items={filteredItems} empty={items.length?"Nenhum resultado com estes filtros. Limpe os filtros ou inclua os preços pendentes.":"Sua lista está vazia. Atualize o catálogo ou importe a lista CAIXA abaixo."} onOpen={id=>{setSelectedId(id);setTab("Resumo do ativo");}} onFavorite={toggleFavorite} onCompare={toggleCompare} compareIds={compareIds} at={clock} onDelete={deleteManual}/>
             </Card>
             <details><summary className="cursor-pointer rounded-xl bg-white p-4 font-bold">Importar lista CSV ou Excel</summary>
             <Card
-              title="Importação manual protegida"
+              title="Traga sua lista de oportunidades"
               note="CSV, XLS e XLSX são processados no navegador e ficam separados do catálogo público em triagem."
             >
               <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-dashed border-[#b6cfc0] bg-[#f8fbf8] p-7 text-sm font-bold text-[#236746]">
@@ -973,8 +866,7 @@ export default function Home() {
               </label>
               <p className="mt-3 text-xs text-[#61786c]">
                 Cabeçalhos reconhecidos: ID, URL/Link, Nome/Imóvel/Endereço,
-                Cidade, Fonte/Origem e Descrição. Mesmo ID ou URL atualiza o
-                registro e adiciona histórico local.
+                Cidade, UF, Preço, Fonte/Origem e Descrição. Confira a prévia: reimportações preservam o financeiro e os anexos.
               </p>
               <p className="mt-2 text-xs text-[#61786c]">
                 O download público da CAIXA pode ser usado como arquivo de
@@ -988,10 +880,18 @@ export default function Home() {
                   Abrir página oficial de download da lista CAIXA
                 </a>
               </p>
+              <details className="mt-4"><summary className="cursor-pointer font-bold">Prefere colar os dados da planilha?</summary><p className="my-2 text-sm">Copie as células com cabeçalho e cole aqui. Funciona também com texto CSV.</p><textarea className="input min-h-32" aria-label="Dados da lista" value={importText} onChange={e=>setImportText(e.target.value)} placeholder="ID;Nome;Cidade;UF;Preço;Link"/><button className="btn mt-2" disabled={!importText.trim()} onClick={previewPastedList}>Conferir lista colada</button></details>
+              {importBatches.length>0 && <details className="mt-4"><summary>Últimas importações</summary>{importBatches.slice(0,5).map(b=><p className="mt-2 text-xs" key={b.id}>{b.fileName}: {b.created} novos, {b.updated} atualizados · {b.importedAt.slice(0,10)}</p>)}</details>}
             </Card>
             </details>
           </section>
         )}
+        {pendingImport && tab === "Pipeline" && <Card title="Confira antes de importar" note={`${pendingImport.fileName}: ${pendingImport.total} linha(s), ${pendingImport.rows.length} válida(s), ${pendingImport.rejected.length} recusada(s), ${pendingImport.duplicates} repetida(s).`}>
+          <p className="mb-3 text-sm">Preços desconhecidos ficam pendentes. Avaliação do banco não é usada como preço de revenda. Datas e disponibilidade exigem conferência.</p>
+          <div className="max-h-80 overflow-auto"><table className="w-full text-left text-sm"><thead><tr><th>Linha</th><th>Imóvel / cidade</th><th>Preço</th><th>Avisos</th></tr></thead><tbody>{pendingImport.rows.slice(0,100).map(r=><tr className="border-b" key={r.row}><td>{r.row}</td><td className="p-2">{r.name}<br/>{r.city}</td><td>{fmt(r.observedBid)}</td><td className="p-2">{r.warnings.join("; ")}</td></tr>)}</tbody></table>{pendingImport.rejected.slice(0,100).map(r=><p className="mt-2 text-sm text-rose-700" key={r.row}>Linha {r.row}: {r.reason}</p>)}</div>
+          <p className="my-3 text-xs">Prévia limitada a 100 linhas por grupo. O relatório inclui todas as linhas.</p>
+          <div className="flex flex-wrap gap-3"><button className="btn" disabled={!pendingImport.rows.length} onClick={confirmImport}>Importar {pendingImport.rows.length} linhas válidas</button><button className="btn" onClick={downloadImportReport}>Baixar relatório completo</button><button className="underline" onClick={()=>setPendingImport(null)}>Cancelar</button></div>
+        </Card>}
         {selected && tab === "Fluxo" && (
           <section className="space-y-5">
             <Card
@@ -1030,7 +930,7 @@ export default function Home() {
                 <Info
                   label="Documento crítico"
                   value={
-                    selected.checks.find((c) => c.status !== "aprovado")
+                    selected.checks.find((c) => !validCheck(c))
                       ?.title || "Checklist completo"
                   }
                 />
@@ -1277,9 +1177,9 @@ export default function Home() {
               title="Cálculo financeiro preliminar"
               note="Premissas alinhadas ao modelo auditado: margem ≥ 30%, custo/saída ≤ 70%, ciclo ≤ 9 meses e concentração ≤ 20%."
             >
-              <div className="grid gap-3 sm:grid-cols-3">
+              <p className="mb-3 text-sm">{result.missing.length} campo(s) pendente(s). Preencha por etapa; use zero somente quando o custo for comprovadamente inexistente.</p><h3 className="mb-3 font-bold">1. Compra e revenda</h3><div className="grid gap-3 sm:grid-cols-2">
                 <Num
-                  label="ARV / saída conservadora"
+                  label="Por quanto espera revender? (conservador)"
                   value={f.arv}
                   set={(n) => updateFinance("arv", n)}
                 />
@@ -1294,7 +1194,7 @@ export default function Home() {
                   set={(n) => updateFinance("bid", n)}
                 />
                 <Num label="Comissão leiloeiro (%)" value={f.commissionPct} set={n=>updateFinance("commissionPct",n)} />
-                <Num label="Tributos da venda (validar)" value={f.taxes} set={n=>updateFinance("taxes",n)} />
+                </div><details className="mt-5 rounded-xl border p-4"><summary className="cursor-pointer font-bold">2. Custos e prazo do imóvel</summary><div className="mt-3 grid gap-3 sm:grid-cols-2"><Num label="Tributos da venda (validar)" value={f.taxes} set={n=>updateFinance("taxes",n)} />
                 <Num label="Débitos assumidos" value={f.debts} set={n=>updateFinance("debts",n)} />
                 <Num label="Desocupação" value={f.dispossession} set={n=>updateFinance("dispossession",n)} />
                 <Num label="Comercialização adicional" value={f.marketing} set={n=>updateFinance("marketing",n)} />
@@ -1310,12 +1210,12 @@ export default function Home() {
                   set={(n) => updateFinance("registry", n)}
                 />
                 <Num
-                  label="CAPEX / reforma"
+                  label="Reforma com reserva de obra"
                   value={f.capex}
                   set={(n) => updateFinance("capex", n)}
                 />
                 <Num
-                  label="Carregamento"
+                  label="Condomínio, IPTU e contas até vender"
                   value={f.carry}
                   set={(n) => updateFinance("carry", n)}
                 />
@@ -1339,7 +1239,7 @@ export default function Home() {
                   value={f.months}
                   set={(n) => updateFinance("months", n)}
                 />
-                <Num
+                </div></details><details className="mt-5 rounded-xl border p-4"><summary className="cursor-pointer font-bold">3. Caixa e reservas da operação</summary><div className="mt-3 grid gap-3 sm:grid-cols-2"><Num
                   label="Capital imobiliário"
                   value={f.capital}
                   set={(n) => updateFinance("capital", n)}
@@ -1364,19 +1264,19 @@ export default function Home() {
                   value={f.postDistributionReserve}
                   set={(n) => updateFinance("postDistributionReserve", n)}
                 />
-              </div>
+              </div></details>
             </Card>
             <Card
-              title="Resultado e gates"
+              title="O que os números mostram"
               note="Cálculo local; nunca autorização automática de compra."
             >
               <p className="mb-2 text-sm">{!mandatePass ? "Mandato pendente: confirme apartamento no município do Rio de Janeiro. Expansão exige homologação." : ""}</p>
               <p className="mb-2 text-sm">{selected.observedBid && f.bid < selected.observedBid ? "Bloqueado: lance proposto abaixo do preço anunciado atual." : ""}</p>
-              <p className="mb-4 text-sm">{result.reasons.join(" · ") || "Critérios numéricos atendidos; evidências e revisões continuam necessárias."}</p>
+              <p className="mb-3 text-sm">{result.missing.length ? `Complete os ${result.missing.length} campos pendentes para concluir a análise.` : result.pass ? "Critérios numéricos atendidos. Confira a fonte e os documentos." : "Os números precisam de revisão antes de avançar."}</p><details className="mb-4 text-sm"><summary className="cursor-pointer font-bold">Ver motivos e campos pendentes</summary><ul className="mt-2 list-disc pl-5">{result.reasons.map(reason=><li key={reason}>{reason}</li>)}</ul></details>
               <Info label="ROI sobre custo direto" value={pct(result.roi)} />
               <Info label="Margem após OPEX rateado" value={pct(result.loadedMargin)} />
               <Metric
-                label="MAO com comissão do leiloeiro"
+                label="Teto de lance calculado (MAO)"
                 value={fmt(mao)}
                 ok={mao >= f.bid}
               />
@@ -1607,14 +1507,20 @@ function PipelineTable({
   items,
   empty,
   onOpen,
-  onDelete,
+  onDelete, onFavorite, onCompare, compareIds, at,
 }: {
   items: Opportunity[];
   empty: string;
   onOpen: (id: string) => void;
   onDelete?: (id: string) => void;
+  onFavorite: (id:string)=>void;
+  onCompare: (id:string)=>void;
+  compareIds: string[];
+  at: number;
 }) {
   const [page,setPage]=useState(0);
+  const filterSignature=items.map(i=>i.id).join("|");
+  useEffect(()=>setPage(0),[filterSignature]);
   const currentPage=Math.min(page,Math.max(0,Math.ceil(items.length/50)-1));
   if (!items.length)
     return (
@@ -1633,7 +1539,7 @@ function PipelineTable({
             <th className="p-3">Preço / data</th>
             <th className="p-3">Etapa</th>
             <th className="p-3">Abrir</th>
-            <th className="p-3">Histórico</th>
+            <th className="p-3">Selecionar</th>
             {onDelete && <th className="p-3">Ação</th>}
           </tr>
         </thead>
@@ -1656,8 +1562,8 @@ function PipelineTable({
                   {item.url ? "URL registrada" : "URL pendente"}
                 </p>
               </td>
-              <td className="p-3">{fmt(item.observedBid ?? item.finance.bid)}<p className="text-xs">{item.auctionAt ? new Date(item.auctionAt).toLocaleString("pt-BR",{timeZone:"America/Sao_Paulo"}) : "Data pendente"}</p></td>
-              <td className="p-3">{item.stage}<p className="text-xs">{item.catalogStatus}</p></td>
+              <td className="p-3">{fmt(announcedPrice(item))}<p className="text-xs">{item.auctionAt ? new Date(item.auctionAt).toLocaleString("pt-BR",{timeZone:"America/Sao_Paulo"}) : "Data / disponibilidade pendente"}</p></td>
+              <td className="p-3"><strong>{selectionStatus(item,at)}</strong><p className="text-xs">{item.pipelineOrigin==="verified-catalog"?"Catálogo público":item.pipelineOrigin==="file-import"?"Lista importada":"Cadastro manual"}</p></td>
               <td className="p-3" onClick={(event) => event.stopPropagation()}>
                 {safeUrl(item.url) ? (
                   <a
@@ -1672,7 +1578,7 @@ function PipelineTable({
                   <span className="text-xs text-[#b84629]">Sem URL</span>
                 )}
               </td>
-              <td className="p-3">{item.history.length + " evento(s)"}</td>
+              <td className="p-3 space-y-2" onClick={e=>e.stopPropagation()}><button className="btn" onClick={()=>onOpen(item.id)}>Analisar imóvel</button><button className="block underline" aria-pressed={!!item.favorite} onClick={()=>onFavorite(item.id)}>{item.favorite?"★ Favorito":"☆ Favoritar"}</button><label className="block"><input type="checkbox" checked={compareIds.includes(item.id)} disabled={!compareIds.includes(item.id)&&compareIds.length>=3} onChange={()=>onCompare(item.id)} /> Comparar</label></td>
               {onDelete && (
                 <td
                   className="p-3"
@@ -1680,7 +1586,7 @@ function PipelineTable({
                 >
                   <button
                     className="text-xs font-bold text-rose-700 underline"
-                    onClick={() => onDelete(item.id)}
+                    disabled={item.pipelineOrigin!=="manual"} onClick={() => onDelete(item.id)}
                   >
                     Excluir
                   </button>

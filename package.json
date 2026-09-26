@@ -13,7 +13,7 @@
     "test": "npm run build && node --experimental-strip-types --test tests/*.test.mjs",
     "lint": "bash scripts/sites-env.sh -- eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate",
-    "test:unit": "node --experimental-strip-types --test tests/domain.test.mjs",
+    "test:unit": "node --experimental-strip-types --test tests/domain.test.mjs tests/intake-selection.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -63,7 +63,7 @@
     "wrangler": "4.92.0"
   },
   "type": "module",
-  "displayName": "Hermes Leil\u00e3o RJ \u2014 MVP Local",
+  "displayName": "Hermes Leilão RJ — MVP Local",
   "overrides": {
     "vinext": {
       "image-size": "2.0.3"
