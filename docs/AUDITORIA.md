@@ -58,3 +58,25 @@ Varredura final: **zero críticos, zero altos e quatro moderados**, todos no cam
 O novo teste de importação encontrou coerção incorreta de moeda brasileira pelo leitor CSV. A leitura passou a preservar texto bruto antes da normalização monetária; o caso regressivo verifica CSV e XLSX.
 
 Fontes das correções: [SheetJS oficial](https://docs.sheetjs.com/docs/getting-started/installation/nodejs/), [advisory React](https://github.com/advisories/GHSA-wx67-qw84-cm4g), [advisory Next](https://github.com/advisories/GHSA-2xp9-vwfh-vxw4) e relatório do registro npm.
+
+## Revisão complementar de seleção e importação
+
+Revisão do código existente e dos seis materiais em 26/09/2026. Esta seção complementa os resultados anteriores; os itens corrigidos abaixo substituem as pendências equivalentes da revisão inicial.
+
+- Lista única com origem explícita, favoritos, comparação de até três imóveis, filtro exato por cidade, situação e inclusão consciente de preços pendentes. Paginação retorna ao início quando o conjunto muda.
+- Prévia de importação com linhas físicas, rejeições, conflitos, duplicatas e relatório completo. Alternativa de colar células ou CSV pela interface.
+- Corrigida variante de cabeçalho `N° do imóvel` que dependia de outros campos para ser reconhecida.
+- Preço ausente em nova lista deixa de reutilizar valor antigo ou lance proposto. Dados de análise e anexos permanecem preservados na atualização do cadastro.
+- Valores com separadores malformados são rejeitados. Lance zero e incoerências de giro/capital bloqueiam cálculo elegível. MAO truncado a centavos evita exibir um teto acima do calculado.
+- Importação e cadastro manual deixam de satisfazer automaticamente a vigência. Não se declara imóvel atual somente porque foi recebido por arquivo.
+- Falhas de detalhe passam a constar no diagnóstico de cobertura; todas as falhas de uma fonte a marcam indisponível. Datas impossíveis de calendário são descartadas.
+- Checklist com status aprovado mas evidência inválida continua nas próximas ações. Datas locais usam America/Sao_Paulo.
+- Formulário financeiro organizado em compra/revenda, custos/prazo e caixa/reservas. Margem direta e margem após OPEX permanecem distintas.
+
+Teste de leitura do arquivo histórico CAIXA fornecido: 8.759 linhas reconhecidas, 8.759 registros com identidade, zero rejeições/duplicatas nessa amostra, 6.297 descrições classificadas como apartamento e nenhum preço ausente. Trata-se de teste de estrutura de arquivo histórico, **não** de 8.759 oportunidades atuais, nem de cobertura municipal homologada. O arquivo e seus dados não integram o repositório público.
+
+Fontes e limites de APIs: [FONTES_E_DADOS.md](FONTES_E_DADOS.md). Não foram implantados Supabase remoto, agentes autônomos, lances, assinaturas ou pagamentos.
+
+Verificação desta revisão: TypeScript, build Worker e **31 testes automatizados aprovados** (26 domínio/importação/seleção/conectores e cinco componentes/renderização). Na prévia, importação de texto sintético com moeda brasileira e preço pendente, prévia antes da gravação, favoritos, comparação e navegação para análise foram exercitados no navegador. Leitura CSV/XLSX também testada em código. O envio pelo seletor de arquivos no navegador permanece sem validação ponta a ponta; a alternativa de colar foi validada e não altera permissões da plataforma.
+
+O teste de reimportação no navegador confirmou: preço anunciado removido vira pendente, enquanto a saída conservadora anteriormente digitada e o favorito permanecem. Dados utilizados nesse teste eram fictícios e ficaram apenas na prévia de validação.
