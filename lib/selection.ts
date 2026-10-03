@@ -17,7 +17,7 @@ export function selectOpportunities<T extends SelectionItem>(items:T[],f:Filters
   return items.filter(item=>normalize([item.id,item.name,item.city,item.source,item.stage,item.url].join(' ')).includes(normalize(f.query)) &&
     (!f.source||item.source===f.source) && (!f.city||normalize(item.city)===normalize(f.city)) && (!f.type||item.propertyType===f.type) &&
     (!f.status||selectionStatus(item,at)===f.status) && (!f.favoritesOnly||item.favorite) &&
-    (!f.maxPrice||(Number.isFinite(announcedPrice(item))?announcedPrice(item)<=Number(f.maxPrice):f.includeUnknown)))
+    (Number.isFinite(announcedPrice(item))?(!f.maxPrice||announcedPrice(item)<=Number(f.maxPrice)):f.includeUnknown))
     .sort((a,b)=>{
       const value=(i:T)=>f.sort==='price'?announcedPrice(i):Date.parse(i.auctionAt||'');
       if(f.sort==='name')return a.name.localeCompare(b.name,'pt-BR');

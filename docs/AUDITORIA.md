@@ -1,5 +1,8 @@
 # Auditoria técnica e de produto — 26/09/2026
 
+Revisão mais recente: [auditoria complementar de 02/10/2026](AUDITORIA_2026-10-02.md).
+Os resultados abaixo registram as verificações históricas, em suas respectivas datas.
+
 ## Escopo e autoridade das fontes
 
 Revisados os seis materiais fornecidos pelo proprietário: projeto principal revisado, modelo Holding V1.1, Investment Machine, estudo de viabilidade, esqueleto de software e protocolo de benchmark. Os documentos originais não são publicados. Também foi confrontado o código da aplicação existente com o plano.

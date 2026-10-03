@@ -5,6 +5,7 @@ import * as XLSX from "xlsx";
 import { catalogCurrent, calculate, evidenceValid, financeFields, invalidateDecision, normalize, rowsFromMatrix, safeUrl } from "@/lib/domain";
 import { prepareIntake, type IntakePlan } from "@/lib/intake";
 import { announcedPrice, selectionStatus, selectOpportunities } from "@/lib/selection";
+import { readLocalSnapshot } from "@/lib/local-state";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -268,6 +269,20 @@ async function storeFiles(files: { key: string; file: File }[]) {
     d.close();
   }
 }
+async function readStoredFile(key: string): Promise<Blob> {
+  const database = await openFiles();
+  try {
+    return await new Promise<Blob>((resolve, reject) => {
+      const request = database.transaction("files").objectStore("files").get(key);
+      request.onsuccess = () => request.result instanceof Blob
+        ? resolve(request.result)
+        : reject(new Error("Arquivo ausente neste navegador"));
+      request.onerror = () => reject(request.error);
+    });
+  } finally {
+    database.close();
+  }
+}
 function badge(s: CheckState) {
   return s === "aprovado"
     ? "bg-emerald-100 text-emerald-800"
@@ -318,8 +333,8 @@ export default function Home() {
   const expired = selected ? selected.evidence.some(e=>!!e.expiry && e.expiry<now()) : false;
   const financePass = result.pass && (!selected?.observedBid || f.bid >= selected.observedBid);
   const mandatePass = selected?.propertyType === "Apartamento" && ["riodejaneiro","riodejaneirorj"].includes(normalize(selected.city));
-  const [clock,setClock]=useState(Date.now());
-  useEffect(()=>{const tick=setInterval(()=>setClock(Date.now()),60000);return ()=>clearInterval(tick);},[]);
+  const [clock,setClock]=useState(0);
+  useEffect(()=>{const update=()=>setClock(Date.now());const first=setTimeout(update,0);const tick=setInterval(update,60000);return ()=>{clearTimeout(first);clearInterval(tick);};},[]);
   const committeeReady = !!selected && catalogCurrent(selected,clock) && mandatePass && blockers===0 && !expired && financePass;
   // Owner-only local storage cannot authenticate two independent approvers.
   const finalCommitteeReady = false;
@@ -329,17 +344,18 @@ export default function Home() {
   const toggleCompare=(id:string)=>setCompareIds(ids=>ids.includes(id)?ids.filter(x=>x!==id):ids.length<3?[...ids,id]:ids);
 
   useEffect(() => {
+    let active = true;
+    queueMicrotask(() => {
+    if (!active) return;
     try {
       const raw = localStorage.getItem(STORE);
       storedSnapshot.current=raw;
-      const data = raw
-        ? (JSON.parse(raw) as {
+      const data = readLocalSnapshot(raw) as {
             items?: Opportunity[];
             selectedId?: string;
             importBatches?: ImportBatch[];
             sourceChecks?: SourceCheck[];
-          })
-        : {};
+          };
       const rawItems = Array.isArray(data.items)
         ? data.items.map((item) => ({
             ...make(item),
@@ -380,11 +396,13 @@ export default function Home() {
       );
     }
     setReady(true);
+    });
+    return () => { active = false; };
   }, []);
   useEffect(() => {
     if (ready && !storageBlocked) {
       try {
-        if(localStorage.getItem(STORE)!==storedSnapshot.current) { setStorageBlocked(true);setNotice("Outra aba alterou esta base. Recarregue a página para continuar sem sobrescrever os dados.");return; }
+        if(localStorage.getItem(STORE)!==storedSnapshot.current) { queueMicrotask(()=>{setStorageBlocked(true);setNotice("Outra aba alterou esta base. Recarregue a página para continuar sem sobrescrever os dados.");});return; }
         const snapshot=JSON.stringify({
           items,
           selectedId,
@@ -393,21 +411,23 @@ export default function Home() {
           savedAt: new Date().toISOString(),
         });
         localStorage.setItem(STORE,snapshot);storedSnapshot.current=snapshot;
-      } catch { setStorageBlocked(true); setNotice("Falha ao salvar: armazenamento indisponível ou cheio. Dados da sessão não estão garantidos."); }
+      } catch { queueMicrotask(()=>{setStorageBlocked(true);setNotice("Falha ao salvar: armazenamento indisponível ou cheio. Dados da sessão não estão garantidos.");}); }
     }
   }, [items, selectedId, importBatches, sourceChecks, ready, storageBlocked]);
-  const evidenceKeys = selected?.evidence.map(e=>e.blobKey+e.hash).join("|") || "";
+  const evidenceId = selected?.id;
+  const evidenceKeys = JSON.stringify(selected?.evidence.map(({id,blobKey,hash})=>({id,blobKey,hash})) || []);
   useEffect(()=> {
-    if(!selected?.evidence.length)return;
-    let active=true;const id=selected.id;const docs=selected.evidence;
+    const docs = JSON.parse(evidenceKeys) as Pick<Evidence, "id" | "blobKey" | "hash">[];
+    if(!evidenceId || !docs.length)return;
+    let active=true;const id=evidenceId;
     void (async()=>{
       const checked = await Promise.all(docs.map(async e=>{
-        try {const d=await openFiles();const blob=await new Promise<Blob>((resolve,reject)=>{const r=d.transaction("files").objectStore("files").get(e.blobKey);r.onsuccess=()=>r.result?resolve(r.result):reject(new Error("ausente"));r.onerror=()=>reject(r.error);});d.close();return {id:e.id,integrity:await hash(blob)===e.hash?"verificado" as const:"ausente" as const};} catch{return {id:e.id,integrity:"ausente" as const};}
+        try {const blob=await readStoredFile(e.blobKey);return {id:e.id,integrity:await hash(blob)===e.hash?"verificado" as const:"ausente" as const};} catch{return {id:e.id,integrity:"ausente" as const};}
       }));
       if(active)setItems(all=>all.map(item=>item.id===id?{...item,evidence:item.evidence.map(e=>({...e,integrity:checked.find(c=>c.id===e.id)?.integrity || "ausente"}))}:item));
     })();return ()=>{active=false;};
   // Revalidate the stored bytes whenever the selected dossier or its blob/hash set changes.
-  },[selected?.id,evidenceKeys]);
+  },[evidenceId,evidenceKeys]);
   const mutate = (fn: (i: Opportunity) => Opportunity, msg?: string) => {
     if (!selected) return;
     setItems((all) =>
@@ -642,8 +662,9 @@ export default function Home() {
     setOperationBusy(false);
   }
   async function downloadEvidence(e: Evidence) {
-    try { const d=await openFiles(); const blob=await new Promise<Blob>((resolve,reject)=>{const r=d.transaction("files").objectStore("files").get(e.blobKey);r.onsuccess=()=>r.result?resolve(r.result):reject(new Error("Arquivo ausente neste navegador"));r.onerror=()=>reject(r.error);}); d.close();
-    const u=URL.createObjectURL(blob);const a=document.createElement("a");a.href=u;a.download=e.name;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000); } catch {mutate(i=>({...i,decision:invalidateDecision(),evidence:i.evidence.map(doc=>doc.id===e.id?{...doc,integrity:"ausente",quarantine:"Em quarentena"}:doc)}));setNotice("Arquivo não localizado. Reanexe a evidência; o metadado sozinho não comprova o documento.");}
+    try { const blob=await readStoredFile(e.blobKey);
+    if(await hash(blob)!==e.hash)throw new Error("Integridade divergente");
+    const u=URL.createObjectURL(blob);const a=document.createElement("a");a.href=u;a.download=e.name;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000); } catch {mutate(i=>({...i,decision:invalidateDecision(),evidence:i.evidence.map(doc=>doc.id===e.id?{...doc,integrity:"ausente",quarantine:"Em quarentena"}:doc)}));setNotice("Arquivo ausente ou com integridade divergente. Reanexe a evidência; o metadado sozinho não comprova o documento.");}
   }
   if (!ready)
     return (
@@ -1103,7 +1124,7 @@ export default function Home() {
                             " · " +
                             (e.quarantine || "Em quarentena") + " · integridade " + (e.integrity || "pendente")}
                         </p>
-                        <div className="mt-2 flex gap-3"><button className="btn" onClick={()=>downloadEvidence(e)}>Baixar anexo</button><button className="btn" onClick={()=>{ if(e.integrity!=="verificado" || !reviewer.trim() || !expiry || expiry<now() || confidence!=="Alta") {setNotice("Informe revisor, validade vigente e confiança Alta acima para revisar.");return;} mutate(i=>({...i,decision:invalidateDecision(),evidence:i.evidence.map(doc=>doc.id===e.id?{...doc,reviewer,expiry,confidence,quarantine:"Revisado"}:doc),history:[...i.history,"Evidência revisada: "+e.name+" por "+reviewer]})); }}>Registrar revisão documental</button></div>
+                        <div className="mt-2 flex gap-3"><button className="btn" onClick={()=>downloadEvidence(e)}>Baixar anexo</button><button className="btn" onClick={()=>{ if(e.integrity!=="verificado" || !evidenceValid({...e,reviewer,expiry,confidence,quarantine:"Revisado"},now())) {setNotice("Informe origem, revisor identificado, data de validade vigente e confiança Alta para revisar.");return;} mutate(i=>({...i,decision:invalidateDecision(),evidence:i.evidence.map(doc=>doc.id===e.id?{...doc,reviewer,expiry,confidence,quarantine:"Revisado"}:doc),history:[...i.history,"Evidência revisada: "+e.name+" por "+reviewer]})); }}>Registrar revisão documental</button></div>
                       </div>
                     ))
                   ) : (
@@ -1518,9 +1539,11 @@ function PipelineTable({
   compareIds: string[];
   at: number;
 }) {
-  const [page,setPage]=useState(0);
   const filterSignature=items.map(i=>i.id).join("|");
-  useEffect(()=>setPage(0),[filterSignature]);
+  const [pagination,setPagination]=useState({signature:filterSignature,page:0});
+  if(pagination.signature!==filterSignature)setPagination({signature:filterSignature,page:0});
+  const page=pagination.signature===filterSignature?pagination.page:0;
+  const setPage=(page:number)=>setPagination({signature:filterSignature,page});
   const currentPage=Math.min(page,Math.max(0,Math.ceil(items.length/50)-1));
   if (!items.length)
     return (

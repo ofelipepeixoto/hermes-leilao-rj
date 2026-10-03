@@ -13,7 +13,7 @@
     "test": "npm run build && node --experimental-strip-types --test tests/*.test.mjs",
     "lint": "bash scripts/sites-env.sh -- eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate",
-    "test:unit": "node --experimental-strip-types --test tests/domain.test.mjs tests/intake-selection.test.mjs",
+    "test:unit": "node --experimental-strip-types --test tests/domain.test.mjs tests/intake-selection.test.mjs tests/audit-regressions.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -73,7 +73,7 @@
     },
     "miniflare": {
       "ws": "8.21.0",
-      "undici": "7.29.0",
+      "undici": "7.29.1",
       "sharp": "0.35.4"
     },
     "wrangler": {

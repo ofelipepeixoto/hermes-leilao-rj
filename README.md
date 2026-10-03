@@ -20,10 +20,26 @@ Node >=22.13, npm, Linux/WSL e utilitários GNU (`bash`, `timeout`, `flock`).
 npm ci
 npm run dev
 npm run typecheck
+npm run lint
 npm test
 ```
 
 `npm test` compila a aplicação e executa os testes de domínio e de componentes. `npm run test:unit` executa domínio, importação, seleção e conectores sem build. A implantação usa Worker via vinext/Vite; o arquivo público `.openai/hosting.json` não contém projeto nem credenciais. Não use este repositório como evidência de autorização para publicar dados de usuários.
+
+Em ambientes com diretórios de usuário restritos, use `npm run install:ci` e
+`bash scripts/sites-env.sh -- npm run dev -- --port 5173 --strictPort`.
+O helper mantém caches e arquivos temporários em caminhos ignorados do projeto.
+Em redes que exigem proxy, o Worker local do Vite pode não alcançar os portais.
+Para verificar as integrações pelo servidor Node, com Node 24 e proxy já configurado:
+
+```sh
+npm run build
+NODE_USE_ENV_PROXY=1 bash scripts/sites-env.sh -- npm start -- --port 5174
+```
+
+Isso habilita o suporte nativo de Node ao proxy existente. Não valida a rede do
+Worker publicado em Sites/Cloudflare. Os processos precisam ser reiniciados em
+cada tarefa. Nenhuma chave de API é necessária para os conectores públicos atuais.
 
 ## Limites atuais
 
@@ -37,6 +53,7 @@ O teto de R$245 mil para descoberta deriva apenas do limite de saída de R$350 m
 
 - [Fontes, APIs e regras de dados](docs/FONTES_E_DADOS.md)
 - [Auditoria e verificação](docs/AUDITORIA.md)
+- [Auditoria complementar de 02/10/2026](docs/AUDITORIA_2026-10-02.md)
 - [Concorrentes e alternativas](docs/COMPETIDORES.md)
 - [Roadmap e critérios de aceite](docs/ROADMAP.md)
 

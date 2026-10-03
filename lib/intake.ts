@@ -39,7 +39,8 @@ export function prepareIntake(rows: Record<string,unknown>[], fileName: string, 
     const key = url || id;
     const previous=seen.get(key);
     if (previous) {
-      if (previous.id===item.id && previous.name===item.name && previous.city===item.city && previous.propertyType===item.propertyType && Object.is(previous.observedBid,item.observedBid)) {plan.duplicates++;return;}
+      const sameIdentity = previous.id === item.id || previous.id === item.id + '-' + encodeURIComponent(url);
+      if (sameIdentity && previous.source===item.source && previous.name===item.name && previous.city===item.city && previous.propertyType===item.propertyType && Object.is(previous.observedBid,item.observedBid)) {plan.duplicates++;return;}
       plan.rejected.push({row:line,reason:`Conflito com a linha ${previous.row}: mesmo ID/link com dados diferentes. Corrija antes de importar.`});
       if (plan.rows.includes(previous)) {plan.rows=plan.rows.filter(r=>r!==previous);plan.rejected.push({row:previous.row,reason:`Conflito com a linha ${line}: registro preservado fora da importação.`});}
       return;

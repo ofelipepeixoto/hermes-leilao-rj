@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {prepareIntake} from '../lib/intake.ts';
 import {selectOpportunities,announcedPrice,selectionStatus} from '../lib/selection.ts';
 import {money,rowsFromMatrix,financeFields,calculate,catalogCurrent} from '../lib/domain.ts';
-import {collectCatalog,parseListing} from '../lib/catalog.ts';
+import {collectCatalog} from '../lib/catalog.ts';
 const row={ID:'001',Nome:'Apartamento de teste',Cidade:'Rio de Janeiro',UF:'RJ',Preço:'180.000,50',Link:'https://example.org/1'};
 const filters={query:'',source:'',city:'',type:'',maxPrice:'',includeUnknown:true,status:'',favoritesOnly:false,sort:'price'};
 const item=(id,extra={})=>({id,name:'Apartamento',city:'Rio de Janeiro/RJ',source:'Teste',url:'https://example.org/'+id,stage:'Triagem',pipelineOrigin:'file-import',propertyType:'Apartamento',finance:Object.fromEntries(financeFields.map(k=>[k,NaN])),...extra});

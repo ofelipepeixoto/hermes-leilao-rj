@@ -26,6 +26,9 @@ export function calculate(f: Record<string, number>) {
   const concentration = costs / f.capital;
   const remaining = Math.min(f.workingCapital, f.capital - f.committed) - costs;
   const reasons: string[] = [];
+  if (!missing.length && ![costs, mao, projected, loadedMargin, roi, concentration, remaining].every(Number.isFinite)) {
+    reasons.push('Cálculo fora do intervalo numérico válido; revise as premissas');
+  }
   if(missing.length) reasons.push('Premissas ausentes ou inválidas: '+missing.map(k=>({arv:'saída conservadora',margin:'margem alvo',bid:'lance',commissionPct:'comissão',itbi:'ITBI',registry:'registro',capex:'reforma',carry:'carregamento',selling:'corretagem',legal:'jurídico',contingency:'contingência',taxes:'tributos',debts:'débitos',dispossession:'desocupação',marketing:'comercialização',opexAllocated:'OPEX rateado',months:'prazo',capital:'capital',committed:'giro comprometido',workingCapital:'caixa livre',opexMonthly:'OPEX mensal',postDistributionReserve:'reserva'}[k])).join(', '));
   if(Number.isFinite(f.arv) && !(f.arv >= 180000 && f.arv <= 350000)) reasons.push('Saída conservadora fora de R$180–350 mil');
   if(Number.isFinite(f.margin) && !(f.margin >=30 && f.margin<100)) reasons.push('Margem alvo deve ser de 30% a menos de 100%');
@@ -39,8 +42,13 @@ export function calculate(f: Record<string, number>) {
   if(Number.isFinite(f.postDistributionReserve) && Number.isFinite(f.opexMonthly) && !(f.postDistributionReserve >= f.opexMonthly*12)) reasons.push('Reserva inferior a 12 meses de OPEX');
   return { costs,mao,projected,loadedMargin,roi,concentration,remaining,missing,reasons,pass:reasons.length===0 };
 }
+export function validDate(value: string | undefined): value is string {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(value + 'T00:00:00Z');
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
 export function evidenceValid(e: {quarantine?:string;expiry?:string;confidence?:string;reviewer?:string;hash?:string;source?:string}, today:string) {
- return e.quarantine==='Revisado' && !!e.expiry && e.expiry>=today && e.confidence==='Alta' && !!e.reviewer?.trim() && !/revis[aã]o humana/i.test(e.reviewer) && /^[a-f0-9]{64}$/.test(e.hash||'') && !!e.source?.trim();
+ return e.quarantine==='Revisado' && validDate(e.expiry) && validDate(today) && e.expiry>=today && e.confidence==='Alta' && !!e.reviewer?.trim() && !/revis[aã]o humana/i.test(e.reviewer) && /^[a-f0-9]{64}$/.test(e.hash||'') && !!e.source?.trim();
 }
 export const sourceRow = Symbol("sourceRow");
 export function rowsFromMatrix(matrix: unknown[][]): Record<string,unknown>[] {
@@ -48,6 +56,8 @@ export function rowsFromMatrix(matrix: unknown[][]): Record<string,unknown>[] {
  const fallback = matrix.findIndex(row => row.some(v=>['nome','endereco','imovel'].includes(normalize(v))) && row.some(v=>['cidade','municipio','url','link'].includes(normalize(v))));
  const i = header>=0?header:fallback;
  if(i<0) throw new Error('Cabeçalho não reconhecido. Use ID e Nome/Endereço/URL, ou Nome e Cidade');
+ const columns = matrix[i].map(normalize).filter(Boolean);
+ if (new Set(columns).size !== columns.length) throw new Error('Cabeçalhos repetidos. Use um nome único para cada coluna');
  if(matrix.length-i>10001) throw new Error('Limite de 10.000 linhas por importação');
  return matrix.slice(i+1).map((row,index)=>({row,line:i+index+2})).filter(({row})=>row.some(v=>String(v??'').trim())).map(({row,line})=>Object.assign(Object.fromEntries(matrix[i].map((key,j)=>[String(key??''),row[j]??''])),{[sourceRow]:line}));
 }
