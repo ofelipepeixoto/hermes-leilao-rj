@@ -67,8 +67,18 @@ export function importIdentity(source: string, url: string, fileName: string, co
   const origin = source.trim() || (safeUrl(url) ? new URL(url).hostname : fileName);
   return "import-"+encodeURIComponent(origin.trim().toLowerCase())+"-"+encodeURIComponent(code.trim());
 }
-export function catalogCurrent(item: {pipelineOrigin?:string;catalogStatus?:string;capturedAt?:string;auctionAt?:string}, at=Date.now()) {
-  if(item.pipelineOrigin!=="verified-catalog")return false;
+export function catalogCurrent(item: {pipelineOrigin?:string;catalogStatus?:string;capturedAt?:string;auctionAt?:string;url?:string;source?:string;observedBid?:number;manualVerification?:{url:string;source:string;checkedAt:string;validUntil:string;reviewer:string;evidenceId:string;evidenceHash:string;locator:string;auctionAt:string;observedBid:number};evidence?:{id:string;hash?:string;integrity?:string;quarantine?:string;expiry?:string;confidence?:string;reviewer?:string;source?:string}[]}, at=Date.now()) {
+  if(item.pipelineOrigin!=="verified-catalog") {
+    const v=item.manualVerification;
+    if(!v || !['manual','file-import'].includes(item.pipelineOrigin||''))return false;
+    const checked=Date.parse(v.checkedAt), expiry=Date.parse(v.validUntil), auction=Date.parse(v.auctionAt);
+    const doc=item.evidence?.find(e=>e.id===v.evidenceId);
+    const today=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Sao_Paulo'}).format(new Date(at));
+    return Number.isFinite(checked) && checked<=at && at-checked<=86400000 && expiry>at && expiry<=checked+86400000 && auction>at &&
+      v.url===safeUrl(item.url) && !!v.url && v.source===item.source && !!v.source.trim() && v.auctionAt===item.auctionAt &&
+      Number.isFinite(v.observedBid) && v.observedBid>0 && v.observedBid===item.observedBid && !!v.locator.trim() && !!v.reviewer.trim() && !/^(revis[aã]o humana|executivo|jur[ií]dico|mercado)$/i.test(v.reviewer.trim()) &&
+      !!doc && doc.hash===v.evidenceHash && doc.integrity==='verificado' && evidenceValid(doc,today);
+  }
   const captured=Date.parse(item.capturedAt||""); const auction=Date.parse(item.auctionAt||"");
   return item.catalogStatus==="Triagem · consulta atual" && captured<=at && at-captured<=86400000 && auction>at;
 }

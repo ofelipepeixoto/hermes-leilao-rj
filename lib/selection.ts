@@ -1,5 +1,5 @@
 import { calculate, catalogCurrent, normalize } from './domain.ts';
-export type SelectionItem = {id:string;name:string;city:string;source:string;url:string;stage:string;propertyType?:string;observedBid?:number|null;auctionAt?:string;capturedAt?:string;catalogStatus?:string;pipelineOrigin?:string;favorite?:boolean;finance:Record<string,number>};
+export type SelectionItem = {id:string;name:string;city:string;source:string;url:string;stage:string;propertyType?:string;observedBid?:number;auctionAt?:string;capturedAt?:string;catalogStatus?:string;pipelineOrigin?:string;favorite?:boolean;finance:Record<string,number>};
 export const announcedPrice = (item:SelectionItem) => Number.isFinite(item.observedBid) && Number(item.observedBid)>0 ? Number(item.observedBid) : item.pipelineOrigin==='manual' && Number.isFinite(item.finance.bid) && item.finance.bid>0 ? item.finance.bid : NaN;
 export function selectionStatus(item:SelectionItem, at=Date.now()) {
   if(item.propertyType && !['Apartamento','Pendente'].includes(item.propertyType))return 'Fora do perfil';

@@ -17,7 +17,15 @@ export function readLocalSnapshot(raw: string | null): Record<string, unknown> {
     if (!record(finance) || !financeFields.every(key => finance[key] === undefined || finance[key] === null || typeof finance[key] === 'number')) return false;
     if (!arrayOf(item.history, entry => typeof entry === 'string')) return false;
     if (!arrayOf(item.evidence, entry => record(entry) && strings(entry, ['id', 'name', 'kind', 'source', 'date', 'expiry', 'reviewer', 'hash', 'blobKey']))) return false;
-    if (!arrayOf(item.checks, entry => record(entry) && strings(entry, ['id', 'title', 'status', 'reviewer']) && typeof entry.blocking === 'boolean')) return false;
+    if (!arrayOf(item.checks, entry => record(entry) && strings(entry, ['id', 'title', 'status', 'reviewer']) && typeof entry.blocking === 'boolean' && ['evidenceId','locator'].every(key => entry[key] === undefined || typeof entry[key] === 'string'))) return false;
+    if (item.manualVerification !== undefined) {
+      const v = item.manualVerification;
+      if (!record(v) || !strings(v, ['url','source','checkedAt','validUntil','reviewer','evidenceId','evidenceHash','locator','auctionAt']) || typeof v.observedBid !== 'number' || !Number.isFinite(v.observedBid)) return false;
+    }
+    for (const key of ['evidence', 'checks']) {
+      const ids = (item[key] as Record<string, unknown>[]).map(entry => entry.id);
+      if (ids.some(id => !id) || new Set(ids).size !== ids.length) return false;
+    }
     return item.pipelineOrigin === undefined || ['manual', 'file-import', 'verified-catalog'].includes(String(item.pipelineOrigin));
   })) throw new Error('Estrutura da base local inválida');
   const ids = (value.items as Record<string, unknown>[]).map(item => item.id);
