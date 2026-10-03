@@ -6,6 +6,9 @@ import { catalogCurrent, calculate, evidenceValid, financeFields, invalidateDeci
 import { prepareIntake, type IntakePlan } from "@/lib/intake";
 import { announcedPrice, selectionStatus, selectOpportunities } from "@/lib/selection";
 import { readLocalSnapshot } from "@/lib/local-state";
+import { storeFiles, readStoredFile, discardFiles } from "@/lib/file-storage";
+import { BACKUP_MAX_BYTES, createBackup, verifyBackup, prepareRecovery, commitRecovery, type VerifiedBackup } from "@/lib/backup";
+import { checkApproved, checkEvidenceValid, prepareManualVerification, type ManualVerification } from "@/lib/review";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -42,6 +45,8 @@ type Check = {
   reviewer: string;
   why?: string;
   officialSource?: string;
+  evidenceId?: string;
+  locator?: string;
 };
 type Finance = {
   commissionPct: number;
@@ -122,6 +127,7 @@ type Opportunity = {
   auctionAt?: string;
   snapshotHash?: string;
   capturedAt?: string;
+  manualVerification?: ManualVerification;
   updated: string;
   tenantId: string;
   organizationId: string;
@@ -242,47 +248,6 @@ async function hash(file: Blob) {
     .map((v) => v.toString(16).padStart(2, "0"))
     .join("");
 }
-function openFiles() {
-  return new Promise<IDBDatabase>((resolve, reject) => {
-    const r = indexedDB.open("hermes-leilao-files", 1);
-    r.onupgradeneeded = () => r.result.createObjectStore("files");
-    r.onsuccess = () => resolve(r.result);
-    r.onerror = () => reject(r.error);
-  });
-}
-async function storeFiles(files: { key: string; file: File }[]) {
-  const d = await openFiles();
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const tx = d.transaction("files", "readwrite");
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error || new Error("Gravação de anexos cancelada"));
-      try {
-        for (const { key, file } of files) tx.objectStore("files").put(file, key);
-      } catch (error) {
-        tx.abort();
-        reject(error);
-      }
-    });
-  } finally {
-    d.close();
-  }
-}
-async function readStoredFile(key: string): Promise<Blob> {
-  const database = await openFiles();
-  try {
-    return await new Promise<Blob>((resolve, reject) => {
-      const request = database.transaction("files").objectStore("files").get(key);
-      request.onsuccess = () => request.result instanceof Blob
-        ? resolve(request.result)
-        : reject(new Error("Arquivo ausente neste navegador"));
-      request.onerror = () => reject(request.error);
-    });
-  } finally {
-    database.close();
-  }
-}
 function badge(s: CheckState) {
   return s === "aprovado"
     ? "bg-emerald-100 text-emerald-800"
@@ -299,6 +264,12 @@ export default function Home() {
   const [selectedId, setSelectedId] = useState("");
   const [tab, setTab] = useState("Pipeline");
   const [operationBusy,setOperationBusy] = useState(false);
+  const [backupPreview, setBackupPreview] = useState<VerifiedBackup | null>(null);
+  const [confirmationDocument, setConfirmationDocument] = useState("");
+  const [confirmationLocator, setConfirmationLocator] = useState("");
+  const [confirmationReviewer, setConfirmationReviewer] = useState("");
+  const [confirmationBid, setConfirmationBid] = useState("");
+  const [confirmationAuction, setConfirmationAuction] = useState("");
   const storedSnapshot = useRef<string | null>(null);
   const [pendingImport,setPendingImport]=useState<IntakePlan|null>(null);
   const [importText,setImportText]=useState("");
@@ -326,14 +297,12 @@ export default function Home() {
   const f = selected ? selected.finance : newFinance();
   const result = calculate(f);
   const { costs, mao, projected, concentration } = result;
-  const validCheck = (check: Check) => check.status === "aprovado" && (check.kind
-    ? !!selected?.evidence.some(e=>e.kind===check.kind && e.integrity==="verificado" && evidenceValid(e, now()))
-    : !!safeUrl(selected?.url));
+  const [clock,setClock]=useState(0);
+  const validCheck = (check: Check) => !!selected && checkApproved(selected, check, now(), clock);
   const blockers = selected ? selected.checks.filter(c=>c.blocking && !validCheck(c)).length : 0;
   const expired = selected ? selected.evidence.some(e=>!!e.expiry && e.expiry<now()) : false;
   const financePass = result.pass && (!selected?.observedBid || f.bid >= selected.observedBid);
   const mandatePass = selected?.propertyType === "Apartamento" && ["riodejaneiro","riodejaneirorj"].includes(normalize(selected.city));
-  const [clock,setClock]=useState(0);
   useEffect(()=>{const update=()=>setClock(Date.now());const first=setTimeout(update,0);const tick=setInterval(update,60000);return ()=>{clearTimeout(first);clearInterval(tick);};},[]);
   const committeeReady = !!selected && catalogCurrent(selected,clock) && mandatePass && blockers===0 && !expired && financePass;
   // Owner-only local storage cannot authenticate two independent approvers.
@@ -450,19 +419,19 @@ export default function Home() {
     if(operationBusy)return;
     setOperationBusy(true);
     const next = items.filter((candidate) => candidate.id !== id);
+    const replacementId = next[0]?.id || "";
     try {
-      const database = await openFiles();
-      const transaction = database.transaction("files", "readwrite");
-      item.evidence.forEach((evidence) => transaction.objectStore("files").delete(evidence.blobKey));
-      await new Promise<void>((resolve,reject)=>{transaction.oncomplete=()=>resolve();transaction.onerror=()=>reject(transaction.error);transaction.onabort=()=>reject(transaction.error);});
-      database.close();
-    } catch {
-      setOperationBusy(false);setNotice("Exclusão não concluída: falha no armazenamento. Registro preservado.");return;
-    }
-    const replacement = next;
-    setItems(all=>all.filter(candidate=>candidate.id!==id));
-    setSelectedId(replacement[0]?.id || "");
-    setNotice("Registro manual excluído deste navegador.");setOperationBusy(false);
+      if (localStorage.getItem(STORE) !== storedSnapshot.current) throw new Error("Outra aba alterou a base");
+      const snapshot = JSON.stringify({ items: next, selectedId: replacementId, importBatches, sourceChecks, savedAt: new Date().toISOString() });
+      localStorage.setItem(STORE, snapshot);
+      storedSnapshot.current = snapshot;
+      setItems(next); setSelectedId(replacementId);
+      // Metadata first: a quota failure cannot leave a retained dossier without its files.
+      await discardFiles(item.evidence.map(evidence => evidence.blobKey));
+      setNotice("Registro manual excluído deste navegador.");
+    } catch (error) {
+      setNotice("Falha na exclusão ou limpeza de anexos: " + (error instanceof Error ? error.message : "erro de armazenamento") + ". Recarregue para conferir o estado salvo.");
+    } finally { setOperationBusy(false); }
   };
   const refreshCatalog = async () => {
     if(operationBusy)return;
@@ -538,8 +507,8 @@ export default function Home() {
     }));
   const updateCheck = (checkId: string, status: CheckState) => {
     const check=selected?.checks.find(c=>c.id===checkId);
-    if(status==="aprovado" && check && (check.kind ? !selected?.evidence.some(e=>e.kind===check.kind && e.integrity==="verificado" && evidenceValid(e,now())) : !safeUrl(selected?.url))) {
-      setNotice("Bloqueado: registre URL HTTPS válida e evidência revisada, de alta confiança, com validade e revisor identificado."); return;
+    if(status==="aprovado" && check && (!selected || !checkEvidenceValid(selected,check,now()) || (!check.kind && !catalogCurrent(selected,clock)))) {
+      setNotice("Bloqueado: vincule um documento revisado, página/trecho e responsável identificado. A fonte também precisa estar atual."); return;
     }
     mutate(i=>({...i,decision:invalidateDecision(),checks:i.checks.map(c=>c.id===checkId?{...c,status}:c),history:[...i.history,"Checklist atualizado: "+status]}));
   };
@@ -551,6 +520,7 @@ export default function Home() {
       (i) => ({
         ...i,
         [field]: value,
+        manualVerification: undefined,
         decision: invalidateDecision(),
         history: [...i.history, "Cadastro alterado: "+field+" em "+new Date().toISOString()],
       }),
@@ -605,7 +575,7 @@ export default function Home() {
     for(const row of pendingImport.rows) {
       const existing=next.findIndex(i=>i.pipelineOrigin==="file-import" && ((i.id===row.id && (!row.url||!i.url||row.url===i.url)) || (!!row.url && i.url===row.url)));
       const stamp=new Date().toISOString();
-      const patch={name:row.name,city:row.city,source:row.source,url:row.url,propertyType:row.propertyType,observedBid:row.observedBid,capturedAt:stamp,catalogStatus:"Revalidação manual pendente",updated:now()};
+      const patch={name:row.name,city:row.city,source:row.source,url:row.url,propertyType:row.propertyType,observedBid:row.observedBid,capturedAt:stamp,catalogStatus:"Revalidação manual pendente",manualVerification:undefined,updated:now()};
       if(existing>=0) {next[existing]={...next[existing],...patch,decision:invalidateDecision(),history:[...next[existing].history,`Arquivo ${pendingImport.fileName}, linha ${row.row}, recebido em ${stamp}. `+row.warnings.join("; ")]};updated++;}
       else {const id=next.some(i=>i.id===row.id)?row.id+"-"+encodeURIComponent(row.url||uid()):row.id;next.push(make({...patch,id,pipelineOrigin:"file-import",finance:{...newFinance(),bid:row.observedBid},history:[`Importado de ${pendingImport.fileName}, linha ${row.row}. `+row.warnings.join("; ")]}));created++;}
     }
@@ -666,6 +636,77 @@ export default function Home() {
     if(await hash(blob)!==e.hash)throw new Error("Integridade divergente");
     const u=URL.createObjectURL(blob);const a=document.createElement("a");a.href=u;a.download=e.name;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000); } catch {mutate(i=>({...i,decision:invalidateDecision(),evidence:i.evidence.map(doc=>doc.id===e.id?{...doc,integrity:"ausente",quarantine:"Em quarentena"}:doc)}));setNotice("Arquivo ausente ou com integridade divergente. Reanexe a evidência; o metadado sozinho não comprova o documento.");}
   }
+  function bindCheck(checkId: string, patch: Partial<Pick<Check, "evidenceId" | "locator" | "reviewer">>) {
+    mutate(item => ({ ...item, decision: invalidateDecision(),
+      checks: item.checks.map(check => check.id === checkId ? { ...check, ...patch, status: "em revisão" } : check),
+      history: [...item.history, "Vínculo de evidência alterado em " + new Date().toISOString()],
+    }));
+  }
+  function confirmManualSource() {
+    if (!selected || selected.pipelineOrigin === "verified-catalog") return;
+    try {
+      const verification = prepareManualVerification(selected, {
+        evidenceId: confirmationDocument, locator: confirmationLocator, reviewer: confirmationReviewer,
+        auctionAt: confirmationAuction ? new Date(confirmationAuction + "-03:00").toISOString() : "",
+        observedBid: confirmationBid ? Number(confirmationBid) : NaN,
+      }, now());
+      mutate(item => ({ ...item, manualVerification: verification, auctionAt: verification.auctionAt,
+        observedBid: verification.observedBid, catalogStatus: "Fonte conferida manualmente", decision: invalidateDecision(),
+        checks: item.checks.map(check => !check.kind ? { ...check, evidenceId: verification.evidenceId, locator: verification.locator, reviewer: verification.reviewer, status: "em revisão" } : check),
+        history: [...item.history, "Fonte confirmada manualmente por " + verification.reviewer + " em " + verification.checkedAt + "; comprovante " + verification.evidenceId + "; validade até " + verification.validUntil],
+      }), "Conferência manual registrada por 24 horas. Complete a análise e revise os itens do checklist.");
+    } catch (error) { setNotice(error instanceof Error ? error.message : "Conferência não concluída"); }
+  }
+  async function exportFullBackup() {
+    if (operationBusy || storageBlocked) return;
+    setOperationBusy(true);
+    const expected = storedSnapshot.current;
+    try {
+      const backup = await createBackup({ items, selectedId, importBatches, sourceChecks }, readStoredFile);
+      if (localStorage.getItem(STORE) !== expected) throw new Error("Outra aba alterou a base; recarregue antes de exportar");
+      const url = URL.createObjectURL(new Blob([backup], { type: "application/json" }));
+      const link = document.createElement("a"); link.href = url; link.download = "hermes-backup-" + now() + ".json"; link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setNotice("Backup completo exportado com dossiês e anexos verificados. Guarde-o em local privado; contém os documentos originais.");
+    } catch (error) { setNotice("Backup não concluído: " + (error instanceof Error ? error.message : "falha de armazenamento")); }
+    finally { setOperationBusy(false); }
+  }
+  async function previewBackup(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || operationBusy || storageBlocked) return;
+    setOperationBusy(true); setBackupPreview(null);
+    try {
+      if (file.size > BACKUP_MAX_BYTES) throw new Error("Limite de 96 MB por backup");
+      setBackupPreview(await verifyBackup(await file.text()));
+      setNotice("Backup verificado. Confira a quantidade e confirme a restauração como cópias.");
+    } catch (error) { setNotice("Backup recusado: " + (error instanceof Error ? error.message : "arquivo inválido")); }
+    finally { setOperationBusy(false); }
+  }
+  async function restoreFullBackup() {
+    if (!backupPreview || operationBusy || storageBlocked) return;
+    setOperationBusy(true);
+    const expected = storedSnapshot.current;
+    try {
+      const plan = prepareRecovery({ items, selectedId, importBatches, sourceChecks }, backupPreview, crypto.randomUUID());
+      let saved = "";
+      await commitRecovery(plan, {
+        stage: files => storeFiles(files.map(file => ({ key: file.key, file: file.blob }))),
+        discard: discardFiles,
+        save: snapshot => {
+          if (localStorage.getItem(STORE) !== expected) throw new Error("Outra aba alterou a base; recarregue e tente novamente");
+          saved = JSON.stringify(snapshot); localStorage.setItem(STORE, saved);
+        },
+      });
+      storedSnapshot.current = saved;
+      const data = plan.snapshot as { items: Opportunity[]; selectedId: string; importBatches: ImportBatch[]; sourceChecks: SourceCheck[] };
+      const restored = data.items.map(item => ({ ...item, finance: Object.fromEntries(financeFields.map(key => [key, typeof item.finance[key] === "number" ? item.finance[key] : NaN])) as Finance }));
+      setItems(restored); setSelectedId(data.selectedId); setImportBatches(data.importBatches); setSourceChecks(data.sourceChecks);
+      setBackupPreview(null);
+      setNotice("Restauração concluída. Registros existentes preservados; cópias restauradas exigem nova revisão e conferência da fonte.");
+    } catch (error) { setNotice("Restauração não concluída; base anterior preservada: " + (error instanceof Error ? error.message : "falha de armazenamento")); }
+    finally { setOperationBusy(false); }
+  }
   if (!ready)
     return (
       <main className="grid min-h-screen place-items-center bg-[#f4f7f5]">
@@ -704,6 +745,18 @@ export default function Home() {
         {operationBusy && <p role="status" className="mb-4 rounded-lg bg-amber-100 p-3">Processando… aguarde para editar os registros.</p>}
         {storageBlocked && <p role="alert" className="mb-4 rounded-lg bg-rose-100 p-3">{notice}</p>}
         <fieldset disabled={operationBusy || storageBlocked} className={operationBusy || storageBlocked ? "pointer-events-none opacity-70" : ""}>
+        <details className="mb-5 rounded-xl border border-[#d7e3db] bg-white p-4">
+          <summary className="cursor-pointer text-sm font-bold">Backup e recuperação dos dossiês</summary>
+          <p className="mt-3 text-sm">Exporte os registros e todos os anexos. A restauração adiciona cópias e preserva os registros existentes. Limite: 20 MB por anexo e 64 MB de anexos por backup.</p>
+          <div className="mt-3 flex flex-wrap gap-3"><button className="btn" onClick={exportFullBackup}>Exportar backup completo</button>
+            <label className="btn cursor-pointer">Verificar backup para restaurar<input className="hidden" type="file" accept=".json,application/json" onChange={previewBackup} /></label>
+          </div>
+          {backupPreview && <div className="mt-3 rounded-lg bg-amber-50 p-3 text-sm" role="status">
+            <p>{backupPreview.itemCount} dossiê(s) e {backupPreview.files.length} anexo(s) verificados. Backup de {new Date(backupPreview.createdAt).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}.</p>
+            <p className="mt-1">Aprovações voltam para revisão. Confirme a fonte novamente antes de avançar.</p>
+            <div className="mt-3 flex flex-wrap gap-3"><button className="btn" onClick={restoreFullBackup}>Restaurar como cópias</button><button className="btn" onClick={() => setBackupPreview(null)}>Cancelar restauração</button></div>
+          </div>}
+        </details>
         <div className="mb-5 flex flex-wrap gap-2">
           {tabs.map((item) => (
             <button
@@ -1135,6 +1188,19 @@ export default function Home() {
                 </div>
               </Card>
             </div>
+            {selected.pipelineOrigin !== "verified-catalog" && <Card title="Conferir oportunidade na fonte" note="CAIXA e outras importações exigem conferência humana. Esta confirmação não aprova o investimento.">
+              <p className="mb-3 text-sm">{catalogCurrent(selected, clock) ? "Fonte confirmada até " + new Date(selected.manualVerification!.validUntil).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" }) : "Conferência pendente ou vencida."}</p>
+              {safeUrl(selected.url) && <a className="text-sm font-bold underline" href={safeUrl(selected.url)} target="_blank" rel="noopener noreferrer">Abrir oportunidade na fonte</a>}
+              <p className="mt-3 text-sm">Confira o lote ativo e anexe um comprovante da consulta. Revise esse documento antes de registrar a confirmação.</p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <Field label="Comprovante da consulta"><select className="input" value={confirmationDocument} onChange={e => setConfirmationDocument(e.target.value)}><option value="">Selecione um documento revisado</option>{selected.evidence.filter(doc => doc.integrity === "verificado" && evidenceValid(doc, now())).map(doc => <option key={doc.id} value={doc.id}>{doc.name}</option>)}</select></Field>
+                <Field label="Página, trecho ou localização do lote"><input className="input" value={confirmationLocator} onChange={e => setConfirmationLocator(e.target.value)} placeholder="Ex.: página 1, lote 123, preço e data" /></Field>
+                <Field label="Nome do responsável pela conferência"><input className="input" value={confirmationReviewer} onChange={e => setConfirmationReviewer(e.target.value)} /></Field>
+                <Field label="Lance anunciado confirmado (R$)"><input className="input" type="number" min="0.01" step="0.01" value={confirmationBid} onChange={e => setConfirmationBid(e.target.value)} /></Field>
+                <Field label="Data e hora do certame — Brasília"><input className="input" type="datetime-local" value={confirmationAuction} onChange={e => setConfirmationAuction(e.target.value)} /></Field>
+              </div>
+              <button className="btn mt-3" onClick={confirmManualSource}>Registrar conferência por 24 horas</button>
+            </Card>}
             <Card
               title="Checklist e workflow"
               note="Pendência, divergência ou evidência vencida bloqueiam o comitê."
@@ -1166,14 +1232,21 @@ export default function Home() {
                           "fonte oficial definida pelo responsável"}
                       </p>
                     </div>
+                    <div className="grid w-full gap-3 sm:grid-cols-3">
+                      <Field label="Documento que sustenta este item"><select className="input" value={check.evidenceId || ""} onChange={e => bindCheck(check.id, { evidenceId: e.target.value })}><option value="">Vincule uma evidência</option>{selected.evidence.filter(doc => !check.kind || doc.kind === check.kind).map(doc => <option key={doc.id} value={doc.id}>{doc.name}</option>)}</select></Field>
+                      <Field label="Página ou trecho pertinente"><input key={selected.id + check.id + "locator"} className="input" defaultValue={check.locator || ""} placeholder="Ex.: página 4, ônus do imóvel" onBlur={e => { if (e.target.value !== (check.locator || "")) bindCheck(check.id, { locator: e.target.value }); }} /></Field>
+                      <Field label="Nome do revisor deste item"><input key={selected.id + check.id + "reviewer"} className="input" defaultValue={check.reviewer} onBlur={e => { if (e.target.value !== check.reviewer) bindCheck(check.id, { reviewer: e.target.value }); }} /></Field>
+                    </div>
+                    {check.status === "aprovado" && !validCheck(check) && <p className="w-full text-sm text-rose-700">Aprovação sem validade atual. Reveja documento, vínculo e confirmação da fonte.</p>}
                     <select
-                      value={check.status}
+                      aria-label={"Status: " + check.title}
+                      value={check.status === "aprovado" && !validCheck(check) ? "em revisão" : check.status}
                       onChange={(e) =>
                         updateCheck(check.id, e.target.value as CheckState)
                       }
                       className={
                         "rounded-lg px-3 py-2 text-xs font-bold " +
-                        badge(check.status)
+                        badge(check.status === "aprovado" && !validCheck(check) ? "em revisão" : check.status)
                       }
                     >
                       {[
