@@ -84,6 +84,25 @@ try {
     assert.equal((await state(page)).items[0].observedBid, null);
     await context.close();
   });
+  await check('post-import CTA opens the imported ID even after backup recovery changes selection', async () => {
+    const { context, page } = await fresh(); await pasted(page, csv()); await confirm(page);
+    await page.getByRole('button', { name: 'Analisar primeiro imóvel importado' }).waitFor();
+    const importedId = (await state(page)).selectedId;
+    await page.getByText('Backup e recuperação dos dossiês', { exact: true }).click();
+    const downloadEvent = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Exportar backup completo', exact: true }).click();
+    const backup = await downloadEvent;
+    await page.getByLabel('Verificar backup para restaurar', { exact: true }).setInputFiles(await backup.path());
+    await page.getByRole('button', { name: 'Restaurar como cópias', exact: true }).click();
+    await page.getByText('Restauração concluída.', { exact: false }).waitFor();
+    const restored = await state(page);
+    assert.equal(restored.items.length, 2);
+    assert.notEqual(restored.selectedId, importedId);
+    await page.getByRole('button', { name: 'Analisar primeiro imóvel importado' }).click();
+    await page.getByRole('heading', { name: /Resumo do ativo · Apartamento fictício/ }).waitFor();
+    assert.equal((await state(page)).selectedId, importedId);
+    await context.close();
+  });
   await check('bad file replaces old preview with a focused recoverable error', async () => {
     const { context, page } = await fresh(); await pasted(page, csv());
     await page.getByRole('radio', { name: 'Selecionar arquivo', exact: true }).check();

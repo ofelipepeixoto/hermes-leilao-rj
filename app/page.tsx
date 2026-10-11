@@ -3,7 +3,7 @@
 import { ChangeEvent, cloneElement, isValidElement, useEffect, useId, useMemo, useRef, useState } from "react";
 import { catalogCurrent, calculate, evidenceValid, financeFields, invalidateDecision, normalize, safeUrl } from "@/lib/domain";
 import { type IntakePlan } from "@/lib/intake";
-import { importedItemIndex } from "@/lib/intake-workflow";
+import { importedItemIndex, requireImportedTarget } from "@/lib/intake-workflow";
 import { ImportWorkspace } from "@/components/import-workspace";
 import { FinancialInputs } from "@/components/financial-inputs";
 import { announcedPrice, selectionStatus, selectOpportunities } from "@/lib/selection";
@@ -566,7 +566,12 @@ export default function Home() {
     setItems(next);setImportBatches(batches);setSelectedId(firstId || selectedId);
     const message=`${created} criado(s), ${updated} atualizado(s), ${plan.rejected.length} linha(s) recusada(s) e ${plan.duplicates} repetição(ões) ignorada(s). Análises e anexos anteriores foram preservados. Próximo passo: analisar o primeiro imóvel e completar as pendências.`;
     setNotice(message);
-    return {message};
+    return {message, firstId};
+  }
+  function openImported(importedId: string) {
+    const targetId = requireImportedTarget(items, importedId);
+    setSelectedId(targetId);
+    setTab("Resumo do ativo");
   }
   async function attach(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files || []);
@@ -910,7 +915,7 @@ export default function Home() {
               <PipelineTable items={filteredItems} empty={items.length?"Nenhum resultado com estes filtros. Limpe os filtros ou inclua os preços pendentes.":"Sua lista está vazia. Atualize o catálogo ou importe a lista CAIXA abaixo."} onOpen={id=>{setSelectedId(id);setTab("Resumo do ativo");}} onFavorite={toggleFavorite} onCompare={toggleCompare} compareIds={compareIds} at={clock} onDelete={deleteManual}/>
             </Card>}
             <div id="import-workspace">
-              <ImportWorkspace items={items} baseVersion={JSON.stringify(items)} onConfirm={confirmImport} onContinue={() => setTab("Resumo do ativo")} />
+              <ImportWorkspace items={items} baseVersion={JSON.stringify(items)} onConfirm={confirmImport} onContinue={openImported} />
               <p className="mt-3 text-sm"><a className="font-bold underline" href={caixaSnapshotUrl} target="_blank" rel="noreferrer">Abrir página oficial de download da lista CAIXA</a></p>
               {importBatches.length > 0 && <details className="mt-4"><summary>Últimas importações</summary>{importBatches.slice(0,5).map(b => <p className="mt-2 text-xs" key={b.id}>{b.fileName}: {b.created} novos, {b.updated} atualizados · {b.importedAt.slice(0,10)}</p>)}</details>}
             </div>

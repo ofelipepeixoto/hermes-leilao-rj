@@ -13,8 +13,8 @@ const price = (n: number) => Number.isFinite(n) ? n.toLocaleString('pt-BR', { st
 export function ImportWorkspace({ items, baseVersion, onConfirm, onContinue }: {
   items: { id: string; url: string; pipelineOrigin?: string }[];
   baseVersion: string;
-  onConfirm: (plan: IntakePlan, baseVersion: string) => { message: string };
-  onContinue: () => void;
+  onConfirm: (plan: IntakePlan, baseVersion: string) => { message: string; firstId: string };
+  onContinue: (importedId: string) => void;
 }) {
   const [mode, setMode] = useState<'file' | 'text'>('file');
   const [text, setText] = useState('');
@@ -26,7 +26,7 @@ export function ImportWorkspace({ items, baseVersion, onConfirm, onContinue }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
-  const [completed, setCompleted] = useState(false);
+  const [completedId, setCompletedId] = useState<string | null>(null);
   const generation = useRef(0);
   const mounted = useRef(false);
   const feedback = useRef<HTMLDivElement>(null);
@@ -62,7 +62,7 @@ export function ImportWorkspace({ items, baseVersion, onConfirm, onContinue }: {
   }, [text, draftReady]);
 
   function changed() {
-    setCompleted(false);
+    setCompletedId(null);
     generation.current++;
     setInputVersion(version => version + 1);
     setReview(null); setAccepted(false); setError(''); setMessage('Entrada alterada. Gere uma nova prévia.');
@@ -115,9 +115,18 @@ export function ImportWorkspace({ items, baseVersion, onConfirm, onContinue }: {
     try {
       const outcome = onConfirm(plan, review!.baseVersion);
       setReview(null); setText(''); setAccepted(false); setMessage(outcome.message); setError('');
-      setCompleted(true);
+      setCompletedId(outcome.firstId);
       requestAnimationFrame(() => feedback.current?.focus());
     } catch (reason) { fail(reason); }
+  }
+  function continueImport() {
+    if (!completedId) return;
+    try { onContinue(completedId); }
+    catch (reason) {
+      setCompletedId(null);
+      setError(reason instanceof Error ? reason.message : 'Não foi possível abrir o imóvel importado. Confira os registros no Pipeline.');
+      requestAnimationFrame(() => feedback.current?.focus());
+    }
   }
   function report() {
     if (!plan) return;
@@ -153,7 +162,7 @@ export function ImportWorkspace({ items, baseVersion, onConfirm, onContinue }: {
     <div ref={feedback} tabIndex={-1} className="mt-4" role={error ? 'alert' : 'status'} aria-live={error ? 'assertive' : 'polite'}>
       {busy ? 'Lendo a primeira aba… aguarde a prévia.' : error || message}
     </div>
-    {completed && <button className="btn primary mt-3" onClick={onContinue}>Analisar primeiro imóvel importado</button>}
+    {completedId && <button className="btn primary mt-3" onClick={continueImport}>Analisar primeiro imóvel importado</button>}
     {review && !current && <p role="alert" className="mt-3 text-sm text-rose-800">A base mudou após a prévia. Gere outra prévia para conferir quais registros serão atualizados.</p>}
     {plan && impact && <div className="mt-5 border-t border-[#d7e3db] pt-5">
       <h3 ref={previewHeading} tabIndex={-1} className="font-bold">2. Confira antes de importar · versão {inputVersion}</h3>

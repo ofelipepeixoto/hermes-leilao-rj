@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { prepareIntake } from '../lib/intake.ts';
-import { intakeImpact, intakeReviewCurrent, importedItemIndex } from '../lib/intake-workflow.ts';
+import { intakeImpact, intakeReviewCurrent, importedItemIndex, requireImportedTarget } from '../lib/intake-workflow.ts';
 import { financeGroups, financeIssue, firstFinanceIssue } from '../lib/finance-guidance.ts';
 import { calculate, financeFields } from '../lib/domain.ts';
 import { checkApproved, checkReviewSnapshot, invalidateChecklist } from '../lib/review.ts';
@@ -28,6 +28,16 @@ test('prévia de impacto distingue catálogo, registro manual e reimportação p
   assert.deepEqual(intakeImpact(plan, [{ ...item, pipelineOrigin: 'verified-catalog' }]), { created: 1, updated: 0 });
   assert.equal(importedItemIndex([{ ...item, id: 'previous-id' }], plan.rows[0]), 0);
   assert.equal(importedItemIndex([{ ...item, url: 'https://example.org/other' }], plan.rows[0]), -1);
+});
+
+test('CTA da importação mantém o ID original após recuperação e recusa destino ausente sem fallback', () => {
+  const importedId = 'original-import';
+  const restored = { id: 'restored-copy' };
+  assert.equal(requireImportedTarget([restored, { id: importedId }], importedId), importedId);
+  for (const items of [[restored], []]) {
+    assert.throws(() => requireImportedTarget(items, importedId), /não está mais na base local.*nenhum outro imóvel foi aberto/);
+  }
+  assert.throws(() => requireImportedTarget([restored], ''), /não está mais na base local/);
 });
 
 test('orientação financeira cobre todas as premissas e mantém as regras existentes', () => {
