@@ -152,8 +152,9 @@ body {
 }
 
 .input {
+  min-width: 0;
   width: 100%;
-  border: 1px solid #d7e3db;
+  border: 1px solid #71877b;
   border-radius: 0.5rem;
   background: #fff;
   padding: 0.5rem 0.75rem;
@@ -162,5 +163,28 @@ body {
 }
 
 .input:focus {
-  box-shadow: 0 0 0 2px #9fd68f;
+  outline: 2px solid #236746;
+  outline-offset: 2px;
+}
+
+fieldset { min-width: 0; }
+button, summary, input, select, textarea, a { scroll-margin-block: 1rem; }
+button, summary, .choice { min-height: 44px; }
+button:not(:disabled), summary { cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: .55; }
+:focus-visible { outline: 3px solid #236746; outline-offset: 3px; }
+.btn.primary { background: #103b2b; border-color: #103b2b; color: white; }
+.btn.primary:hover { background: #236746; }
+.choice { display: flex; align-items: center; gap: .5rem; }
+.choice input { flex-shrink: 0; width: 1.1rem; height: 1.1rem; }
+.skip-link { position: absolute; left: 1rem; top: -100px; z-index: 10; background: white; color: #103b2b; padding: .75rem; }
+.skip-link:focus { top: 1rem; }
+@media (max-width: 639px) {
+  .input { font-size: 16px; }
+  .pipeline-table, .pipeline-table tbody { display: block; min-width: 0; }
+  .pipeline-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .pipeline-table tr { display: block; padding: .75rem 0; }
+  .pipeline-table td { display: block; padding: .4rem .5rem; overflow-wrap: anywhere; }
+  .pipeline-table td[data-label]::before { content: attr(data-label) ': '; font-weight: 700; }
+  .pipeline-table td:last-child { border-bottom: 1px solid #d7e3db; }
 }

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createBackup, verifyBackup, prepareRecovery, commitRecovery, sha256 } from '../lib/backup.ts';
-import { checkApproved, checkEvidenceValid, prepareManualVerification } from '../lib/review.ts';
+import { checkApproved, checkEvidenceValid, checkReviewSnapshot, prepareManualVerification } from '../lib/review.ts';
 import { catalogCurrent, financeFields } from '../lib/domain.ts';
 import { readLocalSnapshot } from '../lib/local-state.ts';
 
@@ -18,6 +18,7 @@ async function fixture() {
     finance: Object.fromEntries(financeFields.map(key => [key, key === 'margin' ? 30 : null])),
     decision: { memo: true, audit: 'CONFORME', approval1: true, approval2: true }, evidence: [doc],
     checks: [{ id: 'check', title: 'Comparáveis', kind: 'Parecer', blocking: true, status: 'aprovado', reviewer: 'Ana Teste', evidenceId: 'doc', locator: 'página 1, comparáveis' }] };
+  item.checks[0].reviewedSnapshot = checkReviewSnapshot(item, item.checks[0]);
   const snapshot = { items: [item], selectedId: item.id, importBatches: [{id:'batch', fileName:'caixa.csv', importedAt:new Date(at).toISOString(), rows:1,created:1,updated:0}], sourceChecks: [] };
   const input = { evidenceId: 'doc', reviewer: 'Ana Teste', locator: 'página 1, lote 123', auctionAt: '2026-10-10T15:00:00Z', observedBid: 90000 };
   return { doc, item, snapshot, input };
@@ -118,6 +119,7 @@ test('checklist da fonte exige vínculo documental e confirmação atual', async
   const check = {...item.checks[0],kind:undefined};
   assert.equal(checkApproved(item,check,today,at),false);
   const confirmed = {...item,manualVerification:prepareManualVerification(item,input,today,at),auctionAt:input.auctionAt,observedBid:input.observedBid};
+  check.reviewedSnapshot = checkReviewSnapshot(confirmed, check);
   assert.equal(checkApproved(confirmed,check,today,at),true);
   assert.equal(checkApproved(confirmed,check,today,at+86400000),false);
 });
