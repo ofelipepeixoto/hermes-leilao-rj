@@ -19,7 +19,9 @@ Aplicação de triagem e análise de apartamentos no município do Rio de Janeir
 
 ## Executar e testar
 
-Node >=22.13, npm, Linux/WSL e utilitários GNU (`bash`, `timeout`, `flock`).
+Node >=22.13, npm e Linux/WSL. Os scripts exigem `bash`, GNU `timeout` e `flock`.
+No Windows, instale Node e npm dentro do WSL e execute os comandos abaixo no
+terminal Linux do WSL.
 
 ```sh
 npm ci
@@ -35,6 +37,7 @@ npm audit --audit-level=high
 Em ambientes com diretórios de usuário restritos, use `npm run install:ci` e
 `bash scripts/sites-env.sh -- npm run dev -- --port 5173 --strictPort`.
 O helper mantém caches e arquivos temporários em caminhos ignorados do projeto.
+`install:ci` também exige `curl` e `sha256sum`.
 Em redes que exigem proxy, o Worker local do Vite pode não alcançar os portais.
 Para verificar as integrações pelo servidor Node, com Node 24 e proxy já configurado:
 

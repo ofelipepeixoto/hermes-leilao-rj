@@ -14,12 +14,19 @@ Local MVP in shadow mode. No bidding, payments, signatures or final investment a
 
 ## Run locally without an AI key
 
+Requires Node >=22.13, npm and Linux/WSL. The project scripts require `bash`, GNU
+`timeout` and `flock`. On Windows, install Node and npm inside WSL and run the
+commands below in the WSL Linux terminal.
+
 ```sh
 npm ci
 npm run dev
 ```
 
-Open http://localhost:5173. For Windows commands, installation requirements, private-mode configuration and the full operational reference, see the [Portuguese README](README.md). This is an English onboarding guide; it does not replace that reference.
+Open http://localhost:5173. For restricted-environment installation (`install:ci`,
+which also requires `curl` and `sha256sum`) and the full operational reference,
+see the [Portuguese README](README.md). This is an English onboarding guide; it
+does not replace that reference.
 
 ## Reproducible verification
 
