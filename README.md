@@ -1,5 +1,7 @@
 # Hermes Leilão RJ
 
+[English](README_EN.md) · [Demonstração e estudo de caso](docs/portfolio/CASE_STUDY.md) · [Contribuir](CONTRIBUTING.md)
+
 Aplicação de triagem e análise de apartamentos no município do Rio de Janeiro. Ajuda a encontrar oportunidades, organizar evidências e calcular viabilidade antes da revisão humana. Versão local, em modo sombra: não autoriza investimentos nem executa lances.
 
 ## O que funciona
