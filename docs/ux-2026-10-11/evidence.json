@@ -1,0 +1,154 @@
+{
+  "baseCommit": "00aad72f4942738c70ce468390eb37d226e35cd1",
+  "evaluatedSourceSha256": {
+    "app/page.tsx": "2e222de53449f919e4c7df825e38f34a59544fcd2996bea3f3ab6d25b51523e6",
+    "app/globals.css": "b50a1be6485faebfb5fca84deee55ae0e52045068ad681f2f53a06ea9f91909b",
+    "components/import-workspace.tsx": "dfba99959a6fd2ab9e47f2a29c4d4cbb8ca36d9caea03793d380723c4d8a3446",
+    "components/financial-inputs.tsx": "74ecbc9ee8615467719e206c1d64b28be770003f808d37ba08e20586b225cd6c",
+    "lib/intake-workflow.ts": "96748f8954946d1641ec45577c3b3a55bb81d45d2a125bf977e9e5a75f3d5188",
+    "lib/finance-guidance.ts": "6f38480b4aefb32d6c42559cef74484e55fcf6d7c26f8b7830976576a54cf4dd",
+    "lib/review.ts": "605209e1a4f2c6ba415a48ca3689788b9f75983fa19827e967edc1c92917d7d7",
+    "lib/local-state.ts": "ea7bb15297d69f51c690177cc7c45c904dfe1adb7bf406508cfce3a1dc8b779d",
+    "tests/guided-shadow.test.mjs": "124f3acda12f3729d3ff9613afe7db8c89f1d101684ff70ff8110d1afcd3e810",
+    "tests/shadow-workflow.browser.mjs": "cc10ac6b9d211c930538a297fe267990986fefdb339cbcbb64bfe52c0127c2b3",
+    "tests/recovery-review.test.mjs": "1db2d7b14fe4bdd622b1fff51a704b82c1bf24def7afc17f0227935b2f9b27d7"
+  },
+  "environment": {
+    "node": "v24.19.0",
+    "npm": "11.9.0",
+    "chromium": "Chromium 151.0.7922.173 built on Debian GNU/Linux 13 (trixie)",
+    "platform": "Linux"
+  },
+  "baseline": {
+    "stalePreviewEnabled": true,
+    "importedDespiteEditedText": [
+      "Apartamento fictício A"
+    ],
+    "fileInputVisibility": [
+      {
+        "display": "none"
+      }
+    ],
+    "financeMissing": "20 campo(s) pendente(s). Preencha por etapa; use zero somente quando o custo for comprovadamente inexistente."
+  },
+  "checks": {
+    "typecheck": "passed",
+    "lint": "passed, zero warnings",
+    "npm test": {
+      "build": "passed",
+      "tests": 60,
+      "passed": 60
+    },
+    "audit": {
+      "info": 0,
+      "low": 0,
+      "moderate": 0,
+      "high": 0,
+      "critical": 0,
+      "total": 0
+    }
+  },
+  "browser": {
+    "base": "http://127.0.0.1:5173",
+    "results": [
+      {
+        "name": "empty workspace has a direct import path and no misleading private label",
+        "status": "passed",
+        "ms": 1574
+      },
+      {
+        "name": "file upload works from keyboard; missing, duplicate and rejected rows are explained",
+        "status": "passed",
+        "ms": 1300
+      },
+      {
+        "name": "editing a reviewed input removes stale preview and resets consent",
+        "status": "passed",
+        "ms": 1658
+      },
+      {
+        "name": "bad file replaces old preview with a focused recoverable error",
+        "status": "passed",
+        "ms": 1321
+      },
+      {
+        "name": "text draft resumes after reload and requires a new preview",
+        "status": "passed",
+        "ms": 1884
+      },
+      {
+        "name": "guided finance preserves edits, flags invalid inputs, resumes area and keeps committee blocked",
+        "status": "passed",
+        "ms": 2333
+      },
+      {
+        "name": "reimport retains financial assumptions and evidence, while announced price returns to pending",
+        "status": "passed",
+        "ms": 1954
+      },
+      {
+        "name": "checklist review binds the current version and stays invalid after editing then reverting finance",
+        "status": "passed",
+        "ms": 2786
+      },
+      {
+        "name": "quota failure does not announce success or commit records; input can be retried",
+        "status": "passed",
+        "ms": 1693
+      },
+      {
+        "name": "concurrent tab data is preserved instead of overwritten by preview confirmation",
+        "status": "passed",
+        "ms": 1382
+      },
+      {
+        "name": "320px pipeline exposes actions without page overflow; catalog failure is recoverable",
+        "status": "passed",
+        "ms": 1698
+      }
+    ],
+    "pageErrors": [],
+    "blockedExternal": [],
+    "catalogRequests": 1,
+    "fixtures": "Synthetic only; catalog response mocked locally",
+    "screenshots": [
+      "after-empty-desktop.png",
+      "after-preview-mobile.png",
+      "after-finance-mobile.png"
+    ]
+  },
+  "images": [
+    {
+      "path": "before-import.png",
+      "sha256": "62b46c9a4f1cf9cd65758d6ec4c5f776432c69fafac7b3d67c803e0e394ca914",
+      "basis": "baseCommit",
+      "data": "synthetic only"
+    },
+    {
+      "path": "after-empty-desktop.png",
+      "sha256": "54587622b3db82b4e9b6d0cefeb90913601f5098b6d2364c2adac8b470375737",
+      "basis": "evaluatedSourceSha256",
+      "data": "synthetic only"
+    },
+    {
+      "path": "after-preview-mobile.png",
+      "sha256": "41f54289b0566f69a42afacb21a7c1f7238e853fea4b1ef183bc61b9b48a7ffc",
+      "basis": "evaluatedSourceSha256",
+      "data": "synthetic only"
+    },
+    {
+      "path": "after-finance-mobile.png",
+      "sha256": "2126c349f25f7377cf44b5e1b3c8b3e2e25f73328b5a5f0ef6694a5e43b75f11",
+      "basis": "evaluatedSourceSha256",
+      "data": "synthetic only"
+    }
+  ],
+  "limits": [
+    "No live auction catalog calls",
+    "One local mocked 502 catalog response",
+    "No public demo access; HTTP tunnel returned 403",
+    "No production parity claim",
+    "No user research or full WCAG certification",
+    "No deployment or operational approval"
+  ]
+}

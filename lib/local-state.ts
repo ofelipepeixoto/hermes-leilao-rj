@@ -17,7 +17,7 @@ export function readLocalSnapshot(raw: string | null): Record<string, unknown> {
     if (!record(finance) || !financeFields.every(key => finance[key] === undefined || finance[key] === null || typeof finance[key] === 'number')) return false;
     if (!arrayOf(item.history, entry => typeof entry === 'string')) return false;
     if (!arrayOf(item.evidence, entry => record(entry) && strings(entry, ['id', 'name', 'kind', 'source', 'date', 'expiry', 'reviewer', 'hash', 'blobKey']))) return false;
-    if (!arrayOf(item.checks, entry => record(entry) && strings(entry, ['id', 'title', 'status', 'reviewer']) && typeof entry.blocking === 'boolean' && ['evidenceId','locator'].every(key => entry[key] === undefined || typeof entry[key] === 'string'))) return false;
+    if (!arrayOf(item.checks, entry => record(entry) && strings(entry, ['id', 'title', 'status', 'reviewer']) && typeof entry.blocking === 'boolean' && ['evidenceId','locator','reviewedSnapshot','reviewedAt'].every(key => entry[key] === undefined || typeof entry[key] === 'string'))) return false;
     if (item.manualVerification !== undefined) {
       const v = item.manualVerification;
       if (!record(v) || !strings(v, ['url','source','checkedAt','validUntil','reviewer','evidenceId','evidenceHash','locator','auctionAt']) || typeof v.observedBid !== 'number' || !Number.isFinite(v.observedBid)) return false;
@@ -31,6 +31,7 @@ export function readLocalSnapshot(raw: string | null): Record<string, unknown> {
   const ids = (value.items as Record<string, unknown>[]).map(item => item.id);
   if (new Set(ids).size !== ids.length) throw new Error('IDs repetidos na base local');
   if (value.selectedId !== undefined && typeof value.selectedId !== 'string') throw new Error('Seleção inválida');
+  if (value.activeTab !== undefined && (typeof value.activeTab !== 'string' || !['Pipeline', 'Resumo do ativo', 'Fluxo', 'Dossiê', 'Financeiro', 'Comitê'].includes(value.activeTab))) throw new Error('Área de trabalho inválida');
   if (value.importBatches !== undefined && !arrayOf(value.importBatches, entry => record(entry) && strings(entry, ['id', 'fileName', 'importedAt']) && ['rows', 'created', 'updated'].every(key => typeof entry[key] === 'number' && Number.isFinite(entry[key]) && Number(entry[key]) >= 0))) throw new Error('Histórico de importações inválido');
   if (value.sourceChecks !== undefined && !arrayOf(value.sourceChecks, entry => record(entry) && strings(entry, ['name', 'url', 'mode', 'checkedAt', 'status', 'message']))) throw new Error('Diagnóstico de fontes inválido');
   return value;

@@ -1,0 +1,104 @@
+{
+  "parentCommit": "4e4cd40da584a07738c7942fdcf3c9a594d4edb0",
+  "baseCommit": "00aad72f4942738c70ce468390eb37d226e35cd1",
+  "sourceSha256": {
+    "app/page.tsx": "24c5c7b90ad1ef78d203ee8793199243b1925b93879655d7adfb0a9ffe83ec8c",
+    "components/import-workspace.tsx": "53726d38ad5999e45cf84ecae1bfb3d62c0c17f516cfde43503b4ab5831994c8",
+    "lib/intake-workflow.ts": "8e6a7edca0abd31ae624fbea6e80e60c6f1520a0be1e8eadf5952dd0ed6ee41b",
+    "tests/guided-shadow.test.mjs": "6270390fb6d0d4ac43d5a21f1f60a6539987107b7063ea79409aa7a6ed0fe051",
+    "tests/shadow-workflow.browser.mjs": "03fbe2b76aff82633005ecacb31b29a8a0f3fa47cf75a5557de4838828469a0f"
+  },
+  "before": {
+    "reproduced": true,
+    "scenario": "Import, export backup, restore copies in Pipeline, click post-import CTA",
+    "expected": "Original imported ID",
+    "actual": "Restored recovery copy ID"
+  },
+  "after": {
+    "typecheck": "passed",
+    "lint": "passed without warnings",
+    "build": "passed",
+    "nodeTests": {
+      "passed": 61,
+      "total": 61
+    },
+    "browser": {
+      "base": "http://127.0.0.1:5173",
+      "results": [
+        {
+          "name": "empty workspace has a direct import path and no misleading private label",
+          "status": "passed",
+          "ms": 2164
+        },
+        {
+          "name": "file upload works from keyboard; missing, duplicate and rejected rows are explained",
+          "status": "passed",
+          "ms": 1380
+        },
+        {
+          "name": "editing a reviewed input removes stale preview and resets consent",
+          "status": "passed",
+          "ms": 1656
+        },
+        {
+          "name": "post-import CTA opens the imported ID even after backup recovery changes selection",
+          "status": "passed",
+          "ms": 1911
+        },
+        {
+          "name": "bad file replaces old preview with a focused recoverable error",
+          "status": "passed",
+          "ms": 1466
+        },
+        {
+          "name": "text draft resumes after reload and requires a new preview",
+          "status": "passed",
+          "ms": 1685
+        },
+        {
+          "name": "guided finance preserves edits, flags invalid inputs, resumes area and keeps committee blocked",
+          "status": "passed",
+          "ms": 2918
+        },
+        {
+          "name": "reimport retains financial assumptions and evidence, while announced price returns to pending",
+          "status": "passed",
+          "ms": 2050
+        },
+        {
+          "name": "checklist review binds the current version and stays invalid after editing then reverting finance",
+          "status": "passed",
+          "ms": 2556
+        },
+        {
+          "name": "quota failure does not announce success or commit records; input can be retried",
+          "status": "passed",
+          "ms": 1406
+        },
+        {
+          "name": "concurrent tab data is preserved instead of overwritten by preview confirmation",
+          "status": "passed",
+          "ms": 822
+        },
+        {
+          "name": "320px pipeline exposes actions without page overflow; catalog failure is recoverable",
+          "status": "passed",
+          "ms": 1727
+        }
+      ],
+      "pageErrors": [],
+      "blockedExternal": [],
+      "catalogRequests": 1,
+      "fixtures": "Synthetic only; catalog response mocked locally",
+      "screenshots": []
+    }
+  },
+  "ciScope": "Chromium is local only, not a remote workflow gate. Remote Verify runs npm ci, typecheck, lint, npm test (build + Node tests), npm audit.",
+  "unchanged": [
+    "PR base",
+    "lib/domain.ts",
+    "dependencies",
+    "workflow",
+    "operational permissions"
+  ]
+}
